@@ -9,7 +9,7 @@ logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
 # Environment variables
-API_BASE_URL = os.environ.get('API_BASE_URL', 'http://vmprocondock.catastrobogota.gov.co:3400/auth-catia/')
+API_BASE_URL = os.environ.get('API_BASE_URL', 'http://vmprocondock.catastrobogota.gov.co:3400/catia-auth')
 API_KEY = os.environ.get('API_KEY', '')
 
 def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
@@ -23,8 +23,8 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     Returns:
         Response formatted for Bedrock Agent
     """
-    print("API BASE:", API_BASE_URL)
     logger.info("=== Iniciando Lambda - Validar Identidad ===")
+    logger.info(f"API_BASE_URL: {API_BASE_URL}")
     logger.info(f"Event recibido: {json.dumps(event)}")
     
     try:
@@ -48,7 +48,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             elif prop.get('name') == 'nombre':
                 nombre = prop.get('value')
         
-        logger.info(f"Parámetros extraídos - Tipo: {tipo_documento}, Documento: {documento}")
+        logger.info(f"Parámetros extraídos - Nombre: {nombre}, Tipo: {tipo_documento}, Documento: {documento}")
         
         # Validate required parameters
         if not documento or not tipo_documento or not nombre:
@@ -57,7 +57,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 status_code=400,
                 body={
                     "valido": False,
-                    "mensaje": "Parámetros requeridos faltantes: documento y tipoDocumento"
+                    "mensaje": "Parámetros requeridos faltantes: nombre, documento y tipoDocumento"
                 },
                 event=event
             )
@@ -80,7 +80,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 "mensaje": response_data.get('data', {}).get('mensaje', ''),
                 "correo_ofuscado": response_data.get('data', {}).get('emailOfuscado', ''),
                 "correo": "",  # Not provided by API
-                "nombre": nombre   # Not provided by API, may need additional call
+                "nombre": nombre
             }
             
             logger.info(f"Resultado de validación mapeado: {json.dumps(validation_result)}")
@@ -93,12 +93,14 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             )
         else:
             # Handle API errors
-            logger.error(f"API respondió con error - Status: {api_response['status_code']}, Error: {api_response.get('error', 'Error desconocido')}")
+            api_response_data = api_response.get('data', {})
+            logger.error(f"API respondió con error - Status: {api_response['status_code']}, Error: {api_response_data.get('message', 'Error desconocido')}, Error Code: {api_response_data.get('errorCode', 'N/A')}")
+            logger.info(f"Datos de respuesta del API en error: {json.dumps(api_response_data)}")
             return format_bedrock_response(
                 status_code=api_response['status_code'],
                 body={
                     "valido": False,
-                    "mensaje": f"Error en la validación: {api_response.get('error', 'Error desconocido')}"
+                    "mensaje": f"Error en la validación: {api_response_data.get('message', 'Error desconocido')}"
                 },
                 event=event
             )
@@ -127,6 +129,8 @@ def call_identity_validation_api(tipo_documento: str, numero_documento: str) -> 
     Returns:
         Dictionary with status_code, data, and optional error
     """
+    logger.info(f"=== Llamando API de validación ===")
+    
     try:
         # Prepare API request
         url = f"{API_BASE_URL}/auth/temp-key"
@@ -134,8 +138,11 @@ def call_identity_validation_api(tipo_documento: str, numero_documento: str) -> 
         payload = {
             "tipoDocumento": tipo_documento,
             "numeroDocumento": numero_documento,
-            "validInput": True  # Assuming input is validated
+            "validInput": True
         }
+        
+        logger.info(f"URL completa: {url}")
+        logger.info(f"Payload a enviar: {json.dumps(payload)}")
         
         headers = {
             'Content-Type': 'application/json',
@@ -144,8 +151,12 @@ def call_identity_validation_api(tipo_documento: str, numero_documento: str) -> 
         # Add API key if available
         if API_KEY:
             headers['Authorization'] = f'Bearer {API_KEY}'
+            logger.info("API Key agregado al header de autorización")
+        else:
+            logger.warning("No se encontró API_KEY en las variables de entorno")
         
         # Make HTTP request
+        logger.info("Enviando petición POST al API")
         response = requests.post(
             url,
             json=payload,
@@ -153,35 +164,65 @@ def call_identity_validation_api(tipo_documento: str, numero_documento: str) -> 
             timeout=30
         )
         
-        # Parse response
-        response_data = response.json()
+        logger.info(f"Respuesta recibida - Status Code: {response.status_code}")
+        logger.info(f"Response headers: {dict(response.headers)}")
+        logger.info(f"Response content length: {len(response.content)} bytes")
+        logger.info(f"Response raw content: {response.text[:500]}")  # Log first 500 chars
         
+        # Check if response is empty
+        if not response.content or len(response.content) == 0:
+            logger.error("Respuesta vacía del API")
+            return {
+                'status_code': 500,
+                'error': 'El API retornó una respuesta vacía'
+            }
+        
+        # Check content type
+        content_type = response.headers.get('Content-Type', '')
+        logger.info(f"Content-Type de respuesta: {content_type}")
+        
+        if 'application/json' not in content_type.lower():
+            logger.warning(f"Content-Type no es JSON: {content_type}")
+            logger.warning(f"Respuesta completa: {response.text}")
+        
+        # Try to parse response
+        try:
+            response_data = response.json()
+            logger.info(f"Response body parseado exitosamente: {json.dumps(response_data)}")
+        except json.JSONDecodeError as json_err:
+            logger.error(f"Error al parsear JSON: {str(json_err)}")
+            logger.error(f"Contenido que causó el error: {response.text}")
+            return {
+                'status_code': 500,
+                'error': f'Respuesta del API no es un JSON válido. Content-Type: {content_type}, Content: {response.text[:200]}'
+            }
+        
+        logger.info("=== Llamada al API completada exitosamente ===")
         return {
             'status_code': response.status_code,
             'data': response_data
         }
     
     except requests.exceptions.Timeout:
+        logger.error("Error: Timeout al conectar con el API (30 segundos)")
         return {
             'status_code': 504,
             'error': 'Tiempo de espera agotado al conectar con el API'
         }
-    except requests.exceptions.ConnectionError:
+    except requests.exceptions.ConnectionError as e:
+        logger.error(f"Error de conexión con el API: {str(e)}")
         return {
             'status_code': 503,
-            'error': 'No se pudo conectar con el API'
+            'error': f'No se pudo conectar con el API: {str(e)}'
         }
     except requests.exceptions.RequestException as e:
+        logger.error(f"Error en la solicitud HTTP: {str(e)}")
         return {
             'status_code': 500,
             'error': f'Error en la solicitud HTTP: {str(e)}'
         }
-    except json.JSONDecodeError:
-        return {
-            'status_code': 500,
-            'error': 'Respuesta del API no es un JSON válido'
-        }
     except Exception as e:
+        logger.exception(f"Error inesperado en call_identity_validation_api: {str(e)}")
         return {
             'status_code': 500,
             'error': f'Error inesperado: {str(e)}'
@@ -195,11 +236,14 @@ def format_bedrock_response(status_code: int, body: Dict[str, Any], event: Dict[
     Args:
         status_code: HTTP status code
         body: Response body
+        event: Original event from Bedrock Agent
     
     Returns:
         Formatted response for Bedrock Agent
     """
-    return {
+    logger.info(f"Formateando respuesta para Bedrock Agent - Status: {status_code}")
+    
+    formatted_response = {
         'messageVersion': '1.0',
         'response': {
             'actionGroup': event.get('actionGroup', ''),
@@ -208,8 +252,11 @@ def format_bedrock_response(status_code: int, body: Dict[str, Any], event: Dict[
             'httpStatusCode': status_code,
             'responseBody': {
                 'application/json': {
-                    'body': json.dumps(body)
+                    'body': json.dumps(body, ensure_ascii=False)
                 }
             }
         }
     }
+    
+    logger.info(f"Respuesta formateada: {json.dumps(formatted_response, ensure_ascii=False)}")
+    return formatted_response
