@@ -36,6 +36,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         properties = application_json.get('properties', [])
         
         # Parse input parameters
+        nombre = None
         documento = None
         tipo_documento = None
         
@@ -44,11 +45,13 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 documento = prop.get('value')
             elif prop.get('name') == 'tipoDocumento':
                 tipo_documento = prop.get('value')
+            elif prop.get('name') == 'nombre':
+                nombre = prop.get('value')
         
         logger.info(f"Parámetros extraídos - Tipo: {tipo_documento}, Documento: {documento}")
         
         # Validate required parameters
-        if not documento or not tipo_documento:
+        if not documento or not tipo_documento or not nombre:
             logger.error("Validación fallida: Parámetros requeridos faltantes")
             return format_bedrock_response(
                 status_code=400,
@@ -77,7 +80,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 "mensaje": response_data.get('data', {}).get('mensaje', ''),
                 "correo_ofuscado": response_data.get('data', {}).get('emailOfuscado', ''),
                 "correo": "",  # Not provided by API
-                "nombre": ""   # Not provided by API, may need additional call
+                "nombre": nombre   # Not provided by API, may need additional call
             }
             
             logger.info(f"Resultado de validación mapeado: {json.dumps(validation_result)}")
