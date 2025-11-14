@@ -3,164 +3,145 @@
   "info": {
     "title": "Contar Predios",
     "version": "1.0.0",
-    "description": "API utilizada por el agente de Bedrock para consultar el número de predios asociados a un usuario, a través de la Lambda `cat-prod-lambda-contar-predios`."
+    "description": "Llamado a la API para obtener información del número de predios del usuario"
   },
   "paths": {
     "/contar-predios": {
       "get": {
-        "summary": "Obtiene el número de predios asociados a un usuario",
-        "description": "Endpoint consumido por la Lambda `cat-prod-lambda-contar-predios` para obtener el número de predios asociados al usuario identificado por su documento.",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "documento",
-            "required": true,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Documento de identidad del usuario."
+        "summary": "Obtiene información del número de predios del usuario",
+        "description": "Realiza un llamado a la api de CEL para obtener información de los predios del usuario",
+        "operationId": "contarPredios",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "documento": {
+                    "type": "string",
+                    "description": "Numero de documento ingresado por el usuario"
+                  }
+                },
+                "required": ["documento"]
+              }
+            }
           }
-        ],
+        },
         "responses": {
           "200": {
-            "description": "Operación exitosa.",
+            "description": "Respuesta exitosa de contar predios",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/PrediosResponse"
-                },
-                "example": {
-                  "numeroPredios": 3,
-                  "mensaje": "Consulta exitosa",
-                  "documento": "123456789"
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean" },
+                    "message": { "type": "string" },
+                    "data": { "type": "object" },
+                    "errorCode": { "type": "string" }
+                  }
                 }
               }
             }
           },
           "400": {
-            "description": "Parámetros inválidos o faltantes.",
+            "description": "Solicitud inválida: falta el documento o es incorrecto",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                },
-                "example": {
-                  "message": "Missing required parameter 'documento'",
-                  "code": "BAD_REQUEST"
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean" },
+                    "message": { "type": "string" },
+                    "data": { "type": "object" },
+                    "errorCode": { "type": "string" }
+                  }
                 }
               }
             }
           },
           "401": {
-            "description": "Token inválido, expirado, o sesión no autenticada.",
+            "description": "Sesión no autenticada o token expirado",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                },
-                "example": {
-                  "message": "Token inválido o expirado",
-                  "code": "UNAUTHORIZED"
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean" },
+                    "message": { "type": "string" },
+                    "data": { "type": "object" },
+                    "errorCode": { "type": "string" }
+                  }
                 }
               }
             }
           },
           "405": {
-            "description": "Usuario no activo.",
+            "description": "Usuario no se encuentra activo",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                },
-                "example": {
-                  "message": "User is not active",
-                  "code": "USER_INACTIVE"
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean" },
+                    "message": { "type": "string" },
+                    "data": { "type": "object" },
+                    "errorCode": { "type": "string" }
+                  }
                 }
               }
             }
           },
           "406": {
-            "description": "El usuario no tiene preguntas de seguridad registradas.",
+            "description": "El usuario no ha diligenciado preguntas de seguridad",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                },
-                "example": {
-                  "message": "User has no security questions",
-                  "code": "NO_SECURITY_QUESTIONS"
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean" },
+                    "message": { "type": "string" },
+                    "data": { "type": "object" },
+                    "errorCode": { "type": "string" }
+                  }
                 }
               }
             }
           },
           "500": {
-            "description": "Error interno del backend o error no controlado.",
+            "description": "Error interno del servidor",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                },
-                "example": {
-                  "message": "Internal server error",
-                  "code": "INTERNAL_ERROR"
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean" },
+                    "message": { "type": "string" },
+                    "data": { "type": "object" },
+                    "errorCode": { "type": "string" }
+                  }
                 }
               }
             }
           },
           "502": {
-            "description": "Error de red, timeout o fallo al conectar con el sistema externo.",
+            "description": "Error técnico o timeout al consultar el backend externo",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                },
-                "example": {
-                  "message": "Timeout connecting to external API",
-                  "code": "API_TIMEOUT"
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean" },
+                    "message": { "type": "string" },
+                    "data": { "type": "object" },
+                    "errorCode": { "type": "string" }
+                  }
                 }
               }
             }
           }
         }
-      }
-    }
-  },
-  "components": {
-    "schemas": {
-      "PrediosResponse": {
-        "type": "object",
-        "properties": {
-          "numeroPredios": {
-            "type": "integer",
-            "description": "Número total de predios asociados al usuario."
-          },
-          "mensaje": {
-            "type": "string"
-          },
-          "documento": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "numeroPredios",
-          "mensaje",
-          "documento"
-        ]
-      },
-      "ErrorResponse": {
-        "type": "object",
-        "properties": {
-          "message": {
-            "type": "string"
-          },
-          "code": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "message",
-          "code"
-        ]
       }
     }
   }
