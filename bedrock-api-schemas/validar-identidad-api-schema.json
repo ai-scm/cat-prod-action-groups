@@ -1,0 +1,119 @@
+{
+    "openapi": "3.0.0",
+    "info": {
+      "title": "Validar Identidad API",
+      "version": "1.0.0",
+      "description": "API para validar la identidad de un ciudadano"
+    },
+    "paths": {
+      "/validar-identidad": {
+        "post": {
+          "summary": "Valida el documento de identidad de un ciudadano",
+          "description": "Verifica si el documento de identidad es válido y retorna información del ciudadano",
+          "operationId": "validarIdentidad",
+          "requestBody": {
+            "required": true,
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "documento": {
+                      "type": "string",
+                      "description": "Número de cédula de ciudadanía"
+                    },
+                    "tipoDocumento": {
+                      "type": "string",
+                      "description": "Tipo de documento de identidad"
+                    },
+                    "nombre": {
+                      "type": "string",
+                      "description": "Nombre del usuario"
+                    }
+                  },
+                  "required": ["documento","tipoDocumento"]
+                }
+              }
+            }
+          },
+          "responses": {
+            "200": {
+              "description": "Respuesta de validación",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "type": "object",
+                    "properties": {
+                      "valido": { "type": "boolean" },
+                      "correo": { "type": "string" },
+                      "correo_ofuscado": { "type": "string" },
+                      "nombre": { "type": "string" },
+                      "message": { "type": "string" }
+                    }
+                  }
+                }
+              }
+            },
+            "400":{
+              "description": "Error en los datos enviados o usuario no encontrado",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "type": "object",
+                    "properties": {
+                      "success": { "type": "boolean" },
+                      "message": { "type": "string" },
+                      "errorCode": { "type": "string" }
+                    }
+                  }
+                }
+              }
+            },
+            "500":{
+              "description": "Error en el servidor al procesar la solicitud",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "type": "object",
+                    "properties": {
+                      "success": { "type": "boolean" },
+                      "message": { "type": "string" },
+                      "errorCode": { "type": "string" }
+                    }
+                  }
+                }
+              }
+            },
+            "503":{
+              "description": "No se pudo conectar con el API externo",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "type": "object",
+                    "properties": {
+                      "success": { "type": "boolean" },
+                      "message": { "type": "string" }
+                    }
+                  }
+                }
+              }
+          },
+            "504":{
+              "description": "Error de conexión con el API externo",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "type": "object",
+                    "properties": {
+                      "success": { "type": "boolean" },
+                      "message": { "type": "string" }
+                    }
+                  }
+                }
+              }
+          }
+        }
+      }
+    }
+  }
+}

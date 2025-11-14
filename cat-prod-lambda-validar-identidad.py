@@ -218,6 +218,10 @@ def call_identity_validation_api(tipo_documento: str, numero_documento: str) -> 
                 if attempt == MAX_RETRIES - 1:
                     return {
                         'status_code': 500,
+                        'data': {
+                            'success': False,
+                            'message': 'Error al parsear JSON de la respuesta del API'
+                        },
                         'error': f'Respuesta del API no es un JSON válido después de múltiples intentos. Content-Type: {content_type}, Content: {response.text[:200]}'
                     }
                 
@@ -241,10 +245,15 @@ def call_identity_validation_api(tipo_documento: str, numero_documento: str) -> 
             
             # Si es el último intento, retornar error
             if attempt == MAX_RETRIES - 1:
-                logger.error(f"❌ Timeout después de {MAX_RETRIES} intentos")
+                logger.error(f" Timeout después de {MAX_RETRIES} intentos")
                 return {
                     'status_code': 504,
-                    'error': 'Tiempo de espera agotado al conectar con el API después de múltiples intentos'
+                    'data': {
+                        'success': False,
+                        'message': 'Tiempo de espera agotado al conectar con el API'
+                    },
+                    'error': f'No se pudo conectar con el API después de múltiples intentos debido a timeout: {str(e)}'
+                
                 }
             
             # Aplicar exponential backoff
@@ -258,15 +267,19 @@ def call_identity_validation_api(tipo_documento: str, numero_documento: str) -> 
             
             # Si es el último intento, retornar error
             if attempt == MAX_RETRIES - 1:
-                logger.error(f"❌ Error de conexión después de {MAX_RETRIES} intentos")
+                logger.error(f"Error de conexión después de {MAX_RETRIES} intentos")
                 return {
                     'status_code': 503,
+                    'data': {
+                        'success': False,
+                        'message': 'No se pudo conectar con el API'
+                    },
                     'error': f'No se pudo conectar con el API después de múltiples intentos: {str(e)}'
                 }
             
             # Aplicar exponential backoff
             backoff_time = calculate_backoff(attempt)
-            logger.warning(f"⏳ Esperando {backoff_time}s antes de reintentar...")
+            logger.warning(f"Esperando {backoff_time}s antes de reintentar...")
             time.sleep(backoff_time)
             
         except requests.exceptions.RequestException as e:
@@ -275,15 +288,19 @@ def call_identity_validation_api(tipo_documento: str, numero_documento: str) -> 
             
             # Si es el último intento, retornar error
             if attempt == MAX_RETRIES - 1:
-                logger.error(f"❌ Error en solicitud HTTP después de {MAX_RETRIES} intentos")
+                logger.error(f"Error en solicitud HTTP después de {MAX_RETRIES} intentos")
                 return {
                     'status_code': 500,
-                    'error': f'Error en la solicitud HTTP después de múltiples intentos: {str(e)}'
+                    'data': {
+                        'success': False,
+                        'message': 'Error en la solicitud HTTP al conectar con el API'
+                    },
+                        'error': f'Error en la solicitud HTTP después de múltiples intentos: {str(e)}'
                 }
             
             # Aplicar exponential backoff
             backoff_time = calculate_backoff(attempt)
-            logger.warning(f"⏳ Esperando {backoff_time}s antes de reintentar...")
+            logger.warning(f"Esperando {backoff_time}s antes de reintentar...")
             time.sleep(backoff_time)
             
         except Exception as e:
@@ -291,6 +308,10 @@ def call_identity_validation_api(tipo_documento: str, numero_documento: str) -> 
             logger.exception(f"Error inesperado en call_identity_validation_api: {str(e)}")
             return {
                 'status_code': 500,
+                'data': {
+                    'success': False,
+                    'message': 'Error inesperado al conectar con el API'
+                },
                 'error': f'Error inesperado: {str(e)}'
             }
     
