@@ -8,6 +8,7 @@ import time
 import requests
 import boto3
 import os
+import time
 from botocore.exceptions import ClientError
 
 logger = logging.getLogger()
@@ -25,7 +26,7 @@ MAX_RETRIES = 3
 INITIAL_BACKOFF = 1  # segundos
 MAX_BACKOFF = 8  # segundos
 
-def handler(event, context):
+def lambda_handler(event, context):
     """
     Obtiene el conteo de predios del usuario autenticado
     
@@ -320,7 +321,7 @@ def call_contar_predios_api(token):
                 continue
             
             # Si llegamos aquí, la petición fue exitosa
-            logger.info(f"✅ Llamada al API completada exitosamente en intento {attempt + 1}")
+            logger.info(f"Llamada al API completada exitosamente en intento {attempt + 1}")
             
             return {
                 'status_code': resp.status_code,
