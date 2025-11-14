@@ -25,7 +25,7 @@ API_BASE_URL = os.environ.get(
 )
 
 # Exponential backoff
-MAX_RETRIES = 3
+MAX_RETRIES = 5
 INITIAL_BACKOFF = 1
 MAX_BACKOFF = 8
 
