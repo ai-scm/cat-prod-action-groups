@@ -1,0 +1,26 @@
+{
+  "sessionId": "081899001252980",
+  "actionGroup": "ValidarOTP",
+  "apiPath": "/validar-otp",
+  "httpMethod": "POST",
+  "requestBody": {
+    "content": {
+      "application/json": {
+        "properties": [
+          {
+            "name": "documento",
+            "value": "24681012"
+          },
+          {
+            "name": "codigo",
+            "value": "7219"
+          },
+          {
+            "name": "tipoDocumento",
+            "value": "CC"
+          }
+        ]
+      }
+    }
+  }
+}
