@@ -33,6 +33,7 @@ MAX_BACKOFF = 8
 # ============================================================
 #  MAIN HANDLER
 # ============================================================
+
 def lambda_handler(event, context):
     logger.info("=== Lambda: Contar Predios ===")
     logger.info(f"Event: {json.dumps(event)}")
