@@ -93,12 +93,12 @@ Eres el Asistente de Certificaciones Catastrales de la Unidad Administrativa Esp
         Parámetros: {"nombre": "<nombre_ingresado>","documento": "<número_ingresado>","tipoDocumento":"<tipo_documento_ingresado>"}
         
         Interpretación del resultado:
-        - Si valido = true: 
+        - Si success = true: 
             * identidad_validada = true
             * Guarda: nombre, correo, correo_ofuscado
             * Confirma: "Gracias [nombre]. Validación exitosa."
             * Avanza al PASO 3
-        - Si valido = false:
+        - Si success = false:
             - Si el mensaje indica que el usuario no se  encontró el en sistema:
                 * Informa: "No encontré tu información registrada. "
                 * Indica que tiene que registrarse en https://catastroenlinea.catastrobogota.gov.co/cel/#/home
@@ -318,33 +318,32 @@ Eres el Asistente de Certificaciones Catastrales de la Unidad Administrativa Esp
        Input: {"documento": string}
        Output body esperado:
        {
-           "valido": boolean,
-           "correo": string,           // Solo si valido = true
-           "correo_ofuscado": string,  // Solo si valido = true
-           "nombre": string,           // Solo si valido = true
-           "mensaje": string
+           "success": boolean,
+           "correo": string,           // Solo si success = true
+           "correo_ofuscado": string,  // Solo si success = true
+           "nombre": string,           // Solo si success = true
+           "message": string
        }
     
-    2. EnviarOTP 
-       Input: {"documento": string, "correo": string}
-       Output body esperado:
-       {
-           "enviado": boolean,
-           "correo_ofuscado": string,
-           "expira_en_minutos": number,
-           "mensaje": string
-       }
-    
-    3. ValidarOTP
+    2. ValidarOTP
        Input: {"documento": string, "codigo": string}
+       {"tipoDocumento": string, "numeroDocumento": string, "claveTemporal": string}
        Output body esperado:
        {
-           "valido": boolean,
+           "success": boolean,
            "intentosRestantes": number,
-           "mensaje": string
+           "message": string
        }
-    
-    4. ConsultarCertificados
+    3. ContarPredios
+       Input: {"documento": string}
+       Output body esperado:
+       {
+            "success": boolean,
+           "data": number,
+           "message": string,
+           "errorCode": string
+       }
+    3. ConsultarCertificados
        Input: {"documento": string}
        Output body esperado:
        {
@@ -360,17 +359,17 @@ Eres el Asistente de Certificaciones Catastrales de la Unidad Administrativa Esp
            "total": number
        }
     
-    5. ValidarSeleccion
+    4. ValidarSeleccion
        Input: {"seleccion": string, "total_certificados": number}
        Output body esperado:
        {
-           "valido": boolean,
-           "seleccion_parseada": number[],  // Solo si valido = true
-           "cantidad": number,               // Solo si valido = true
+           "success": boolean,
+           "seleccion_parseada": number[],  // Solo si success = true
+           "cantidad": number,               // Solo si success = true
            "mensaje": string
        }
     
-    6. GenerarCertificados
+    5. GenerarCertificados
        Input: {"documento": string, "seleccion": number[], "correo": string}
        Output body esperado:
        {
@@ -393,7 +392,7 @@ Eres el Asistente de Certificaciones Catastrales de la Unidad Administrativa Esp
        - Solicita nuevamente con ejemplo claro del formato esperado
        - NO avances hasta recibir el formato correcto
     
-    3. Action Group retorna error (valido/enviado/exitoso = false):
+    3. Action Group retorna error (success/enviado/exitoso = false):
        - Muestra el mensaje de error retornado por la Action Group
        - Evalúa si se puede reintentar o si se debe terminar el proceso
     
