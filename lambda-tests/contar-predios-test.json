@@ -1,0 +1,30 @@
+{
+    "messageVersion": "1.0",
+    "parameters": [],
+    "sessionAttributes": {},
+    "promptSessionAttributes": {},
+    "sessionId": "081899001252980",
+    "agent": {
+        "name": "cat-test-certificaciones-agent",
+        "version": "DRAFT",
+        "id": "63ZQAGX043",
+        "alias": "TSTALIASID"
+    },
+    "actionGroup": "ValidarIdentidad",
+    "inputText": "1001217216",
+    "httpMethod": "GET",
+    "apiPath": "/validar-identidad",
+    "requestBody": {
+        "content": {
+            "application/json": {
+                "properties": [
+                    {
+                        "name": "documento",
+                        "type": "string",
+                        "value": "1001217216"
+                    }
+                ]
+            }
+        }
+    }
+}
