@@ -1,0 +1,97 @@
+------------------------------------------------------------
+"CHIP"
+------------------------------------------------------------
+
+{
+  "sessionId": "081899001252980",
+  "actionGroup": "BuscarPredios",
+  "apiPath": "/buscar-predios",
+  "httpMethod": "POST",
+  "requestBody": {
+    "content": {
+      "application/json": {
+        "properties": [
+          {
+            "name": "sessionId",
+            "value": "081899001252980"
+          },
+          {
+            "name": "metodo",
+            "value": "CHIP"
+          },
+          {
+            "name": "valor",
+            "value": "AAA-001-0001-0000-000"
+          }
+        ]
+      }
+    }
+  }
+}
+
+------------------------------------------------------------
+"DIRECCIÓN"
+------------------------------------------------------------
+
+{
+  "sessionId": "081899001252980",
+  "actionGroup": "BuscarPredios",
+  "apiPath": "/buscar-predios",
+  "httpMethod": "POST",
+  "requestBody": {
+    "content": {
+      "application/json": {
+        "properties": [
+          {
+            "name": "sessionId",
+            "value": "081899001252980"
+          },
+          {
+            "name": "metodo",
+            "value": "DIRECCION"
+          },
+          {
+            "name": "valor",
+            "value": "CRA 7 # 32-16"
+          }
+        ]
+      }
+    }
+  }
+}
+
+
+------------------------------------------------------------
+"MATRÍCULA"
+------------------------------------------------------------
+
+{
+  "sessionId": "081899001252980",
+  "actionGroup": "BuscarPredios",
+  "apiPath": "/buscar-predios",
+  "httpMethod": "POST",
+  "requestBody": {
+    "content": {
+      "application/json": {
+        "properties": [
+          {
+            "name": "sessionId",
+            "value": "081899001252980"
+          },
+          {
+            "name": "metodo",
+            "value": "MATRICULA"
+          },
+          {
+            "name": "valor",
+            "value": "50C-12345"
+          },
+          {
+            "name": "zona",
+            "value": "Centro"
+          }
+        ]
+      }
+    }
+  }
+}

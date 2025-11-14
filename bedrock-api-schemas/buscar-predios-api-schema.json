@@ -1,0 +1,185 @@
+{
+  "openapi": "3.0.0",
+  "info": {
+    "title": "Buscar Predios API",
+    "version": "1.0.0",
+    "description": "API para buscar predios específicos usando CHIP, Dirección o Matrícula. Se utiliza cuando el usuario tiene más de 10 predios registrados."
+  },
+  "paths": {
+    "/buscar-predios": {
+      "post": {
+        "summary": "Busca un predio específico",
+        "description": "Busca predios usando diferentes métodos: CHIP (código catastral), Dirección física, o Matrícula inmobiliaria con zona",
+        "operationId": "buscarPredios",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "sessionId": {
+                    "type": "string",
+                    "description": "ID de sesión del Bedrock Agent (heredado automáticamente)"
+                  },
+                  "metodo": {
+                    "type": "string",
+                    "description": "Método de búsqueda",
+                    "enum": ["CHIP", "DIRECCION", "MATRICULA"]
+                  },
+                  "valor": {
+                    "type": "string",
+                    "description": "Valor a buscar según el método: CHIP (ej: AAA-001-0001-0000-000), Dirección (ej: CRA 7 # 32-16), Matrícula (ej: 50C-12345 o 12345)"
+                  },
+                  "zona": {
+                    "type": "string",
+                    "description": "Zona del círculo registral (solo requerido para método MATRICULA)",
+                    "enum": ["Norte", "Centro", "Sur", "NORTE", "CENTRO", "SUR"]
+                  }
+                },
+                "required": ["sessionId", "metodo", "valor"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Búsqueda ejecutada exitosamente (puede encontrar o no encontrar el predio)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "description": "Indica si se encontró el predio"
+                    },
+                    "mensaje": {
+                      "type": "string",
+                      "description": "Mensaje descriptivo del resultado"
+                    },
+                    "predio": {
+                      "type": "object",
+                      "description": "Información del predio encontrado (solo si success = true)",
+                      "properties": {
+                        "chip": {
+                          "type": "string",
+                          "description": "Código CHIP del predio"
+                        },
+                        "direccion": {
+                          "type": "string",
+                          "description": "Dirección física del predio"
+                        },
+                        "matricula": {
+                          "type": "string",
+                          "description": "Matrícula inmobiliaria"
+                        },
+                        "tipo": {
+                          "type": "string",
+                          "description": "Tipo de predio (Urbano, Rural, etc.)"
+                        },
+                        "avaluoCatastral": {
+                          "type": "number",
+                          "description": "Avalúo catastral en pesos colombianos"
+                        },
+                        "area": {
+                          "type": "number",
+                          "description": "Área del predio en metros cuadrados"
+                        }
+                      }
+                    }
+                  },
+                  "required": ["success", "mensaje"]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Petición inválida - Parámetros faltantes o inválidos",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": false
+                    },
+                    "mensaje": {
+                      "type": "string",
+                      "example": "Método de búsqueda es requerido (CHIP, DIRECCION, MATRICULA)"
+                    }
+                  },
+                  "required": ["success", "mensaje"]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No autorizado - Token JWT no encontrado, inválido o expirado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": false
+                    },
+                    "mensaje": {
+                      "type": "string",
+                      "example": "Token de autenticación no encontrado o expirado. Por favor reinicia el proceso."
+                    }
+                  },
+                  "required": ["success", "mensaje"]
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Error interno del servidor",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": false
+                    },
+                    "mensaje": {
+                      "type": "string",
+                      "example": "Error interno al procesar la búsqueda."
+                    }
+                  },
+                  "required": ["success", "mensaje"]
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Error de comunicación con el servicio externo (timeout o error de red)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": false
+                    },
+                    "mensaje": {
+                      "type": "string",
+                      "example": "Error técnico: timeout al buscar el predio. Por favor intenta nuevamente."
+                    }
+                  },
+                  "required": ["success", "mensaje"]
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

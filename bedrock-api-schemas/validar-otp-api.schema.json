@@ -1,0 +1,128 @@
+{
+  "openapi": "3.0.0",
+  "info": {
+    "title": "Validar OTP API",
+    "version": "1.0.0",
+    "description": "API para validar códigos OTP ingresados por el usuario"
+  },
+  "paths": {
+    "/validar-otp": {
+      "post": {
+        "summary": "Valida el código OTP ingresado",
+        "description": "Verifica si el código OTP ingresado es correcto y retorna los intentos restantes",
+        "operationId": "validarOTP",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "documento": {
+                    "type": "string",
+                    "description": "Número de documento del usuario"
+                  },
+                  "codigo": {
+                    "type": "string",
+                    "description": "Código OTP de 4 dígitos recibido por email",
+                    "pattern": "^[0-9]{4}$"
+                  },
+                  "tipoDocumento": {
+                    "type": "string",
+                    "description": "Tipo de documento (CC, CE, NIT, PAS, etc.)",
+                    "enum": ["CC", "CE", "NIT", "PAS", "TI", "DNI"]
+                  }
+                },
+                "required": ["documento", "codigo"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Respuesta de validación exitosa",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "valido": {
+                      "type": "boolean",
+                      "description": "Indica si el código OTP es válido"
+                    },
+                    "intentosRestantes": {
+                      "type": "integer",
+                      "description": "Número de intentos restantes (0-3)",
+                      "minimum": 0,
+                      "maximum": 3
+                    },
+                    "mensaje": {
+                      "type": "string",
+                      "description": "Mensaje descriptivo del resultado"
+                    }
+                  },
+                  "required": ["valido", "intentosRestantes", "mensaje"]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Petición inválida - Faltan parámetros requeridos",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "valido": { "type": "boolean" },
+                    "intentosRestantes": { "type": "integer" },
+                    "mensaje": { "type": "string" }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Error interno del servidor - Error inesperado al procesar la validación",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "valido": { 
+                      "type": "boolean",
+                      "example": false
+                    },
+                    "intentosRestantes": { 
+                      "type": "integer",
+                      "example": 0
+                    },
+                    "mensaje": { 
+                      "type": "string",
+                      "example": "Error interno al procesar la validación"
+                    }
+                  },
+                  "required": ["valido", "intentosRestantes", "mensaje"]
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Error al comunicarse con el servicio de autenticación",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "valido": { "type": "boolean" },
+                    "intentosRestantes": { "type": "integer" },
+                    "mensaje": { "type": "string" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
