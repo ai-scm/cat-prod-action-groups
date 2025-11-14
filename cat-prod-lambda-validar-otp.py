@@ -104,7 +104,7 @@ def handler(event, context):
             )
             
             if token_saved:
-                logger.info(f"Token guardado en DynamoDB para session: {session_id}")
+                logger.info(f"Token guardado en DynamoDB para documento: {tipo_documento}-{documento[:3]}***")
             else:
                 logger.warning("No se pudo guardar token en DynamoDB")
             
@@ -353,13 +353,13 @@ def save_token_to_dynamodb(session_id, token, documento, tipo_documento, usuario
     """
     logger.info("Intentando guardar token en DynamoDB...")
     logger.info(f"  - Tabla: {TABLE_NAME}")
-    logger.info(f"  - SessionId: {session_id if session_id else '[VACÍO]'}")
+    logger.info(f"  - Documento (PK): {tipo_documento}-{documento[:3] if documento else ''}***")
     logger.info(f"  - Token (longitud): {len(token) if token else 0} caracteres")
-    logger.info(f"  - Documento: {tipo_documento}-{documento[:3] if documento else ''}***")
+    logger.info(f"  - SessionId (metadata): {session_id if session_id else '[VACÍO]'}")
     
-    if not session_id or not token:
+    if not documento or not token:
         logger.error("❌ FALLO al guardar token - Validación de entrada")
-        logger.error(f"  - SessionId vacío: {not session_id}")
+        logger.error(f"  - Documento vacío: {not documento}")
         logger.error(f"  - Token vacío: {not token}")
         return False
     
@@ -370,9 +370,9 @@ def save_token_to_dynamodb(session_id, token, documento, tipo_documento, usuario
         ttl_timestamp = int(time.time()) + 600
         
         item = {
-            'sessionId': session_id,
+            'documento': documento,  # ← PARTITION KEY (PK)
             'token': token,
-            'documento': documento,
+            'sessionId': session_id,  # ← Guardado como metadata
             'tipoDocumento': tipo_documento,
             'tokenType': 'Bearer',
             'createdAt': int(time.time()),
@@ -391,9 +391,9 @@ def save_token_to_dynamodb(session_id, token, documento, tipo_documento, usuario
         table.put_item(Item=item)
         
         logger.info("✅ Token guardado exitosamente en DynamoDB")
-        logger.info(f"  - SessionId: {session_id}")
+        logger.info(f"  - Documento (PK): {tipo_documento}-{documento[:3]}***")
+        logger.info(f"  - SessionId (metadata): {session_id}")
         logger.info(f"  - TTL: {ttl_timestamp} ({600} segundos = 10 minutos)")
-        logger.info(f"  - Documento: {tipo_documento}-{documento[:3]}***")
         logger.info(f"  - Usuario: {usuario.get('nombre', 'N/A')} {usuario.get('apellido', 'N/A')}")
         return True
         
@@ -403,7 +403,7 @@ def save_token_to_dynamodb(session_id, token, documento, tipo_documento, usuario
         logger.error(f"❌ Error de DynamoDB: {error_code}")
         logger.error(f"  - Mensaje: {error_message}")
         logger.error(f"  - Tabla: {TABLE_NAME}")
-        logger.error(f"  - SessionId: {session_id}")
+        logger.error(f"  - Documento (PK): {tipo_documento}-{documento[:3] if documento else ''}***")
         return False
     except Exception as e:
         logger.error(f"❌ Error inesperado guardando token")

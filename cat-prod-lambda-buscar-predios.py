@@ -35,7 +35,8 @@ def handler(event, context):
     
     Input esperado:
     {
-        "sessionId": "xxx",
+        "documento": "1234567890",  // REQUERIDO - Para recuperar token JWT
+        "sessionId": "xxx",  // Opcional - Metadata
         "metodo": "CHIP" | "DIRECCION" | "MATRICULA",
         "valor": "AAA-001-0001-0000-000" | "CRA 7 # 32-16" | "50C-12345",
         "zona": "Norte" | "Centro" | "Sur"  // Solo para MATRICULA
@@ -66,17 +67,20 @@ def handler(event, context):
             properties = content['application/json']['properties']
             body = {prop['name']: prop['value'] for prop in properties}
             session_id = body.get('sessionId', event.get('sessionId', ''))
+            documento = body.get('documento', '')
             metodo = body.get('metodo', '')
             valor = body.get('valor', '')
             zona = body.get('zona', '')
         else:
             session_id = event.get('sessionId', '')
+            documento = ''
             metodo = ''
             valor = ''
             zona = ''
     else:
         # Formato directo para testing
         session_id = event.get('sessionId', '')
+        documento = event.get('documento', '')
         metodo = event.get('metodo', '')
         valor = event.get('valor', '')
         zona = event.get('zona', '')
@@ -233,32 +237,32 @@ def handler(event, context):
         }, 500)
 
 
-def get_token_from_dynamodb(session_id):
+def get_token_from_dynamodb(documento):
     """
-    Recupera el token JWT desde DynamoDB usando el sessionId.
+    Recupera el token JWT desde DynamoDB usando el documento.
     
     Args:
-        session_id: ID de sesión del Bedrock Agent
+        documento: Número de documento del ciudadano (PK en DynamoDB)
     
     Returns:
         str: Token JWT o None si no se encuentra
     """
-    if not session_id:
-        logger.warning("⚠️ SessionId vacío")
+    if not documento:
+        logger.warning("⚠️ Documento vacío")
         return None
     
-    logger.info(" Recuperando token de DynamoDB...")
+    logger.info("💾 Recuperando token de DynamoDB...")
     logger.info(f"  - Tabla: {TABLE_NAME}")
-    logger.info(f"  - SessionId: {session_id[:15]}***")
+    logger.info(f"  - Documento (PK): {documento[:3]}*** (longitud: {len(documento)})")
     
     try:
         table = dynamodb.Table(TABLE_NAME)
         
-        response = table.get_item(Key={'sessionId': session_id})
+        response = table.get_item(Key={'documento': documento})
         
         if 'Item' not in response:
             logger.warning(f"⚠️ No se encontró token en DynamoDB")
-            logger.warning(f"  - SessionId: {session_id[:15]}***")
+            logger.warning(f"  - Documento: {documento[:3]}***")
             return None
         
         item = response['Item']
@@ -271,6 +275,7 @@ def get_token_from_dynamodb(session_id):
         logger.info(f"✅ Token recuperado exitosamente")
         logger.info(f"  - Token (longitud): {len(token)} caracteres")
         logger.info(f"  - Token (primeros 30 chars): {token[:30]}***")
+        logger.info(f"  - Documento: {documento[:3]}***")
         
         return token
         
@@ -279,6 +284,7 @@ def get_token_from_dynamodb(session_id):
         error_message = e.response['Error']['Message']
         logger.error(f"❌ Error de DynamoDB: {error_code}")
         logger.error(f"  - Mensaje: {error_message}")
+        logger.error(f"  - Documento: {documento[:3]}***")
         return None
     except Exception as e:
         logger.error(f"❌ Error inesperado obteniendo token")
@@ -421,7 +427,7 @@ def buscar_por_direccion(token, direccion):
         "Accept": "application/json"
     }
     
-    logger.info(f"📡 Llamando API de búsqueda por DIRECCIÓN:")
+    logger.info(f" Llamando API de búsqueda por DIRECCIÓN:")
     logger.info(f"  - Endpoint: GET {URL}")
     logger.info(f"  - Dirección original: {direccion}")
     logger.info(f"  - Dirección encoded: {direccion_encoded}")
@@ -431,7 +437,7 @@ def buscar_por_direccion(token, direccion):
     try:
         resp = requests.get(URL, headers=headers, timeout=15)
         
-        logger.info(f"📡 Respuesta recibida:")
+        logger.info(f" Respuesta recibida:")
         logger.info(f"  - Status Code: {resp.status_code}")
         logger.info(f"  - Content-Type: {resp.headers.get('Content-Type', 'N/A')}")
         logger.info(f"  - Content-Length: {len(resp.content)} bytes")
