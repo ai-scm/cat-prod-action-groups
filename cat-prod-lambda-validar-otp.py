@@ -15,7 +15,6 @@ logger.setLevel(logging.INFO)
 
 # Cliente DynamoDB
 dynamodb = boto3.resource('dynamodb', region_name='us-east-1')
-# Nombre de la tabla configurado por variable de entorno (o hardcodeado)
 TABLE_NAME = 'cat-test-certification-session-tokens'
 
 def handler(event, context):
@@ -25,7 +24,7 @@ def handler(event, context):
     Input esperado:
     {
         "documento": "1234567890",
-        "codigo": "123456"
+        "codigo": "1233"
     }
     
     Output:
@@ -60,6 +59,13 @@ def handler(event, context):
     
     # Obtener sessionId para guardar token
     session_id = event.get('sessionId', '')
+    
+    # Log de parámetros extraídos
+    logger.info("Parámetros extraídos del evento:")
+    logger.info(f"  - sessionId: {session_id if session_id else '[VACÍO]'}")
+    logger.info(f"  - documento: {documento[:3] if documento else '[VACÍO]'}*** (longitud: {len(documento)})")
+    logger.info(f"  - codigo: {codigo[:2] if codigo else '[VACÍO]'}**** (longitud: {len(codigo)})")
+    logger.info(f"  - tipoDocumento: {tipo_documento if tipo_documento else '[VACÍO]'}")
     
     # Validación de inputs
     if not documento or not codigo:
@@ -159,19 +165,19 @@ def call_validar_otp(documento, codigo, tipo_documento):
     {
         "tipoDocumento": "CC | CE | NIT | PAS | etc.",
         "numeroDocumento": "12345678",
-        "claveTemporal": "123456",
+        "claveTemporal": "1234",
         "validInput": true
     }
     
     Args:
         documento: Número de documento del ciudadano
-        codigo: Código OTP de 6 dígitos
+        codigo: Código OTP de 4 dígitos
         tipo_documento: Tipo de documento (CC, CE, NIT, PAS, etc.) - REQUERIDO
     
     Returns:
         dict con {valido, intentosRestantes, mensaje, token (opcional), usuario (opcional)}
     """
-    URL = "http://10.34.116.98:3400/catia-auth/auth/login"
+    URL = "http://vmprocondock.catastrobogota.gov.co:3400/catia-auth/auth/login"
     
     # Nota: tipo_documento ya fue validado en ValidarIdentidad (Paso 2)
     # Aquí solo lo usamos como dato heredado del flujo anterior
@@ -195,11 +201,31 @@ def call_validar_otp(documento, codigo, tipo_documento):
         # Timeout de 10 segundos
         resp = requests.post(URL, json=payload, headers=headers, timeout=10)
         
-        logger.info(f"Status Code: {resp.status_code}")
+        logger.info(f"Respuesta recibida del API:")
+        logger.info(f"  - Status Code: {resp.status_code}")
+        logger.info(f"  - Content-Type: {resp.headers.get('Content-Type', 'N/A')}")
+        logger.info(f"  - Content-Length: {len(resp.content)} bytes")
+        logger.info(f"  - Response (primeros 300 chars): {resp.text[:300]}")
+        
+        # Validar respuesta vacía
+        if not resp.content or len(resp.content) == 0:
+            logger.error("❌ API retornó respuesta vacía")
+            return {
+                "valido": False,
+                "intentosRestantes": 0,
+                "mensaje": "Error: El servidor retornó una respuesta vacía"
+            }
+        
+        # Validar Content-Type
+        content_type = resp.headers.get('Content-Type', '')
+        if 'application/json' not in content_type.lower():
+            logger.warning(f" Content-Type no es JSON: {content_type}")
+            logger.warning(f"Respuesta completa: {resp.text[:500]}")
         
         # Intentar parsear JSON
         try:
             response_data = resp.json()
+            logger.info(f"✅ JSON parseado exitosamente")
         except ValueError:
             logger.error(f"Respuesta no es JSON: {resp.text[:200]}")
             return {
@@ -212,12 +238,16 @@ def call_validar_otp(documento, codigo, tipo_documento):
         if resp.status_code == 200 and response_data.get('success'):
             data = response_data.get('data', {})
             usuario = data.get('usuario', {})
+            token = data.get('token', '')
+            
+            logger.info("✅ OTP VÁLIDO - API respondió exitosamente")
+            logger.info(f"Token JWT recibido:")
             
             return {
                 "valido": True,
                 "intentosRestantes": 3,
                 "mensaje": "Código OTP válido",
-                "token": data.get('token', ''),
+                "token": token,
                 "refreshToken": data.get('refreshToken', ''),
                 "tokenType": data.get('tokenType', 'Bearer'),
                 "expiresIn": data.get('expiresIn', 86400),
@@ -321,8 +351,16 @@ def save_token_to_dynamodb(session_id, token, documento, tipo_documento, usuario
     Returns:
         bool: True si se guardó correctamente, False si hubo error
     """
+    logger.info("Intentando guardar token en DynamoDB...")
+    logger.info(f"  - Tabla: {TABLE_NAME}")
+    logger.info(f"  - SessionId: {session_id if session_id else '[VACÍO]'}")
+    logger.info(f"  - Token (longitud): {len(token) if token else 0} caracteres")
+    logger.info(f"  - Documento: {tipo_documento}-{documento[:3] if documento else ''}***")
+    
     if not session_id or not token:
-        logger.warning("SessionId o token vacío, no se guarda en DynamoDB")
+        logger.error("❌ FALLO al guardar token - Validación de entrada")
+        logger.error(f"  - SessionId vacío: {not session_id}")
+        logger.error(f"  - Token vacío: {not token}")
         return False
     
     try:
@@ -352,14 +390,26 @@ def save_token_to_dynamodb(session_id, token, documento, tipo_documento, usuario
         
         table.put_item(Item=item)
         
-        logger.info(f"✅ Token guardado en DynamoDB: sessionId={session_id}, ttl={ttl_timestamp}")
+        logger.info("✅ Token guardado exitosamente en DynamoDB")
+        logger.info(f"  - SessionId: {session_id}")
+        logger.info(f"  - TTL: {ttl_timestamp} ({600} segundos = 10 minutos)")
+        logger.info(f"  - Documento: {tipo_documento}-{documento[:3]}***")
+        logger.info(f"  - Usuario: {usuario.get('nombre', 'N/A')} {usuario.get('apellido', 'N/A')}")
         return True
         
     except ClientError as e:
-        logger.error(f"Error de DynamoDB: {e.response['Error']['Message']}")
+        error_code = e.response['Error']['Code']
+        error_message = e.response['Error']['Message']
+        logger.error(f"❌ Error de DynamoDB: {error_code}")
+        logger.error(f"  - Mensaje: {error_message}")
+        logger.error(f"  - Tabla: {TABLE_NAME}")
+        logger.error(f"  - SessionId: {session_id}")
         return False
     except Exception as e:
-        logger.error(f"Error guardando token: {str(e)}", exc_info=True)
+        logger.error(f"❌ Error inesperado guardando token")
+        logger.error(f"  - Tipo de error: {type(e).__name__}")
+        logger.error(f"  - Mensaje: {str(e)}")
+        logger.exception("Stack trace completo:")
         return False
 
 
@@ -375,7 +425,12 @@ def build_response(event, response_data, status_code=200):
     Returns:
         dict en formato Bedrock Agent
     """
-    return {
+    logger.info(f" Construyendo respuesta para Bedrock Agent:")
+    logger.info(f"  - Status Code: {status_code}")
+    logger.info(f"  - Action Group: {event.get('actionGroup', 'ValidarOTP')}")
+    logger.info(f"  - Response Body: {json.dumps(response_data, ensure_ascii=False)[:200]}...")
+    
+    formatted_response = {
         "messageVersion": "1.0",
         "response": {
             "actionGroup": event.get('actionGroup', 'ValidarOTP'),
@@ -384,8 +439,11 @@ def build_response(event, response_data, status_code=200):
             "httpStatusCode": status_code,
             "responseBody": {
                 "application/json": {
-                    "body": json.dumps(response_data)
+                    "body": json.dumps(response_data, ensure_ascii=False)
                 }
             }
         }
     }
+    
+    logger.info("✅ Respuesta formateada correctamente")
+    return formatted_response
