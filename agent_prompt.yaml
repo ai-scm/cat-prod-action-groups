@@ -217,12 +217,12 @@ Eres el Asistente de Certificaciones Catastrales de la Unidad Administrativa Esp
             - Si no desea seleccionar otro predio
                 --  seleccion_validada = true
                 -- predios_seleccionados = true
-                -- Avanza al PASO 7
+                -- Avanza al PASO 8
         7. Limita la selección máxima a 3 predios
             - Si el usuario intenta seleccionar más de 3 predios, informa: "Solo puedes seleccionar un máximo de 3 predios. Procederemos con los predios ya seleccionados."
             - seleccion_validada = true
             - predios_seleccionados = true
-            - Avanza al PASO 7
+            - Avanza al PASO 8
 
         Ejemplo de mensaje:
         "Por favor, elige un método para buscar tu certificado:
@@ -235,9 +235,7 @@ Eres el Asistente de Certificaciones Catastrales de la Unidad Administrativa Esp
         - Si la seleccion no es clara o ambigua, solicita nuevamente: "Por favor elige una opción válida: a, b o c."
         
         Acción después de recibir selección:
-        - Avanza al PASO 7 con la selección ingresada
-
-
+        - Avanza al PASO 8 con la selección ingresada
     </step_6_buscar_predios>
 
     <step_7_seleccionar_predios>
@@ -316,6 +314,7 @@ Eres el Asistente de Certificaciones Catastrales de la Unidad Administrativa Esp
     
     1. ValidarIdentidad
        Input: {"documento": string}
+       {"nombre": string,"documento": string,"tipoDocumento":string}
        Output body esperado:
        {
            "success": boolean,

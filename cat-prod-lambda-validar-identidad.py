@@ -62,7 +62,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             return format_bedrock_response(
                 status_code=400,
                 body={
-                    "valido": False,
+                    "success": False,
                     "mensaje": "Parámetros requeridos faltantes: nombre, documento y tipoDocumento"
                 },
                 event=event
@@ -82,7 +82,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             
             # Map API response to expected schema
             validation_result = {
-                "valido": response_data.get('success', False),
+                "success": response_data.get('success', False),
                 "mensaje": response_data.get('data', {}).get('mensaje', ''),
                 "correo_ofuscado": response_data.get('data', {}).get('emailOfuscado', ''),
                 "correo": "",  # Not provided by API
@@ -98,13 +98,15 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 event=event
             )
         else:
+            print("API response:", api_response)
             # Handle API errors
-            logger.error(f"API respondió con error - Status: {api_response['status_code']}, Error: {api_response.get('error', 'Error desconocido')}")
+            error_data = api_response.get('data', {})
+            logger.error(f"API respondió con error - Status: {api_response['status_code']}, Error: {error_data.get('message', 'Error desconocido')}, Error Code: {error_data.get('errorCode', 'N/A')}")
             return format_bedrock_response(
                 status_code=api_response['status_code'],
                 body={
-                    "valido": False,
-                    "mensaje": f"Error en la validación: {api_response.get('error', 'Error desconocido')}"
+                    "success": error_data.get('success', False),
+                    "mensaje": f"Error en la validación: {error_data.get('message', 'Error desconocido')}"
                 },
                 event=event
             )
@@ -115,7 +117,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         return format_bedrock_response(
             status_code=500,
             body={
-                "valido": False,
+                "success": False,
                 "mensaje": f"Error interno del servidor: {str(e)}"
             },
             event=event
