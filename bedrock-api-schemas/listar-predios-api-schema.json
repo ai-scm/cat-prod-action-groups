@@ -1,0 +1,262 @@
+{
+  "openapi": "3.0.0",
+  "info": {
+    "title": "Listar Predios API",
+    "version": "1.0.0",
+    "description": "API para listar todos los predios asociados a un ciudadano (cuando tiene entre 1 y 10 predios). El usuario puede ver la lista completa y seleccionar hasta 3 predios para generar certificados."
+  },
+  "paths": {
+    "/listar-predios": {
+      "post": {
+        "summary": "Listar predios del ciudadano",
+        "description": "Obtiene la lista completa de predios asociados al documento del ciudadano desde la API de catastro. Este endpoint se invoca cuando el usuario tiene entre 1 y 10 predios. La lista incluye información detallada de cada predio: CHIP, dirección, matrícula, tipo, avalúo catastral, área, etc.",
+        "operationId": "listarPredios",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "documento": {
+                    "type": "string",
+                    "description": "Número de documento del ciudadano. REQUERIDO para recuperar el token JWT de autenticación de DynamoDB.",
+                    "example": "1234567890"
+                  },
+                  "sessionId": {
+                    "type": "string",
+                    "description": "OPCIONAL: ID de sesión para tracking y trazabilidad de la conversación con el agente.",
+                    "example": "abc123-session"
+                  }
+                },
+                "required": [
+                  "documento"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Lista de predios obtenida exitosamente o error controlado de la API",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "description": "Indica si la operación fue exitosa",
+                      "example": true
+                    },
+                    "message": {
+                      "type": "string",
+                      "description": "Mensaje descriptivo del resultado para el usuario",
+                      "example": "Se encontraron 5 predio(s) asociados a tu documento"
+                    },
+                    "total": {
+                      "type": "integer",
+                      "description": "Número total de predios encontrados (entre 1 y 10)",
+                      "example": 5,
+                      "minimum": 0,
+                      "maximum": 10
+                    },
+                    "predios": {
+                      "type": "array",
+                      "description": "Array con la información detallada de cada predio",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "chip": {
+                            "type": "string",
+                            "description": "Código único del predio (CHIP)",
+                            "example": "AAA001000100000000000000"
+                          },
+                          "direccion": {
+                            "type": "string",
+                            "description": "Dirección del predio",
+                            "example": "CRA 7 # 32-16"
+                          },
+                          "matricula": {
+                            "type": "string",
+                            "description": "Matrícula inmobiliaria",
+                            "example": "50C-12345"
+                          },
+                          "tipo": {
+                            "type": "string",
+                            "description": "Tipo de predio (Urbano, Rural, etc.)",
+                            "example": "Urbano"
+                          },
+                          "avaluoCatastral": {
+                            "type": "number",
+                            "description": "Avalúo catastral del predio en pesos colombianos",
+                            "example": 150000000
+                          },
+                          "area": {
+                            "type": "number",
+                            "description": "Área del predio en metros cuadrados",
+                            "example": 120.5
+                          },
+                          "destino": {
+                            "type": "string",
+                            "description": "Destino económico del predio",
+                            "example": "Habitacional"
+                          },
+                          "sector": {
+                            "type": "string",
+                            "description": "Sector catastral",
+                            "example": "001"
+                          },
+                          "manzana": {
+                            "type": "string",
+                            "description": "Manzana catastral",
+                            "example": "0001"
+                          },
+                          "predio": {
+                            "type": "string",
+                            "description": "Número de predio",
+                            "example": "0000"
+                          },
+                          "mejora": {
+                            "type": "string",
+                            "description": "Número de mejora",
+                            "example": "000"
+                          }
+                        }
+                      },
+                      "maxItems": 10,
+                      "example": [
+                        {
+                          "chip": "AAA001000100000000000000",
+                          "direccion": "CRA 7 # 32-16",
+                          "matricula": "50C-12345",
+                          "tipo": "Urbano",
+                          "avaluoCatastral": 150000000,
+                          "area": 120.5,
+                          "destino": "Habitacional"
+                        },
+                        {
+                          "chip": "AAA001000200000000000000",
+                          "direccion": "CLL 100 # 15-20",
+                          "matricula": "50C-67890",
+                          "tipo": "Urbano",
+                          "avaluoCatastral": 200000000,
+                          "area": 85.3,
+                          "destino": "Comercial"
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "message",
+                    "total",
+                    "predios"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Error de validación - Parámetros faltantes o inválidos",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": false
+                    },
+                    "message": {
+                      "type": "string",
+                      "example": "Documento es requerido para recuperar el token de autenticación"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Error de autenticación - Token no encontrado o expirado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": false
+                    },
+                    "message": {
+                      "type": "string",
+                      "example": "Token de autenticación no encontrado o expirado. Por favor reinicia el proceso."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Error interno del servidor",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": false
+                    },
+                    "message": {
+                      "type": "string",
+                      "example": "Error interno al procesar la solicitud."
+                    },
+                    "total": {
+                      "type": "integer",
+                      "example": 0
+                    },
+                    "predios": {
+                      "type": "array",
+                      "items": {},
+                      "example": []
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Error de comunicación con la API externa",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": false
+                    },
+                    "message": {
+                      "type": "string",
+                      "example": "Error técnico al obtener la lista de predios. Verifica tu conexión."
+                    },
+                    "total": {
+                      "type": "integer",
+                      "example": 0
+                    },
+                    "predios": {
+                      "type": "array",
+                      "items": {},
+                      "example": []
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -18,9 +18,14 @@
               "schema": {
                 "type": "object",
                 "properties": {
+                  "documento": {
+                    "type": "string",
+                    "description": "Número de documento del ciudadano (REQUERIDO para recuperar token JWT de DynamoDB)",
+                    "example": "1234567890"
+                  },
                   "sessionId": {
                     "type": "string",
-                    "description": "ID de sesión del Bedrock Agent (heredado automáticamente)"
+                    "description": "ID de sesión del Bedrock Agent (OPCIONAL, usado como metadata)"
                   },
                   "metodo": {
                     "type": "string",
@@ -37,7 +42,7 @@
                     "enum": ["Norte", "Centro", "Sur", "NORTE", "CENTRO", "SUR"]
                   }
                 },
-                "required": ["sessionId", "metodo", "valor"]
+                "required": ["documento", "metodo", "valor"]
               }
             }
           }
@@ -54,7 +59,7 @@
                       "type": "boolean",
                       "description": "Indica si se encontró el predio"
                     },
-                    "mensaje": {
+                    "message": {
                       "type": "string",
                       "description": "Mensaje descriptivo del resultado"
                     },
@@ -87,9 +92,35 @@
                           "description": "Área del predio en metros cuadrados"
                         }
                       }
+                    },
+                    "chipAgregado": {
+                      "type": "string",
+                      "description": "CHIP del predio que fue agregado a la selección (solo si success = true)",
+                      "example": "AAA0010001000000000"
+                    },
+                    "totalSeleccionados": {
+                      "type": "integer",
+                      "description": "Número total de CHIPs seleccionados actualmente (incluye el recién agregado)",
+                      "example": 2,
+                      "minimum": 0,
+                      "maximum": 3
+                    },
+                    "chipsSeleccionados": {
+                      "type": "array",
+                      "description": "Lista completa de CHIPs seleccionados para generar certificados",
+                      "items": {
+                        "type": "string"
+                      },
+                      "example": ["AAA0010001000000000", "BBB0020002000000000"],
+                      "maxItems": 3
+                    },
+                    "limiteAlcanzado": {
+                      "type": "boolean",
+                      "description": "Indica si se alcanzó el límite máximo de 3 certificados",
+                      "example": false
                     }
                   },
-                  "required": ["success", "mensaje"]
+                  "required": ["success", "message"]
                 }
               }
             }
@@ -105,12 +136,12 @@
                       "type": "boolean",
                       "example": false
                     },
-                    "mensaje": {
+                    "message": {
                       "type": "string",
                       "example": "Método de búsqueda es requerido (CHIP, DIRECCION, MATRICULA)"
                     }
                   },
-                  "required": ["success", "mensaje"]
+                  "required": ["success", "message"]
                 }
               }
             }
@@ -126,12 +157,12 @@
                       "type": "boolean",
                       "example": false
                     },
-                    "mensaje": {
+                    "message": {
                       "type": "string",
                       "example": "Token de autenticación no encontrado o expirado. Por favor reinicia el proceso."
                     }
                   },
-                  "required": ["success", "mensaje"]
+                  "required": ["success", "message"]
                 }
               }
             }
@@ -147,12 +178,12 @@
                       "type": "boolean",
                       "example": false
                     },
-                    "mensaje": {
+                    "message": {
                       "type": "string",
                       "example": "Error interno al procesar la búsqueda."
                     }
                   },
-                  "required": ["success", "mensaje"]
+                  "required": ["success", "message"]
                 }
               }
             }
@@ -168,12 +199,12 @@
                       "type": "boolean",
                       "example": false
                     },
-                    "mensaje": {
+                    "message": {
                       "type": "string",
                       "example": "Error técnico: timeout al buscar el predio. Por favor intenta nuevamente."
                     }
                   },
-                  "required": ["success", "mensaje"]
+                  "required": ["success", "message"]
                 }
               }
             }
