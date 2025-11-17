@@ -20,17 +20,20 @@
                 "properties": {
                   "documento": {
                     "type": "string",
-                    "description": "Número de documento del usuario"
-                  },
-                  "codigo": {
-                    "type": "string",
-                    "description": "Código OTP de 4 dígitos recibido por email",
-                    "pattern": "^[0-9]{4}$"
+                    "description": "Número de documento del usuario",
+                    "example": "1234567890"
                   },
                   "tipoDocumento": {
                     "type": "string",
                     "description": "Tipo de documento (CC, CE, NIT, PAS, etc.)",
-                    "enum": ["CC", "CE", "NIT", "PAS", "TI", "DNI"]
+                    "enum": ["CC", "CE", "NIT", "PAS", "TI", "DNI"],
+                    "example": "CC"
+                  },
+                  "codigo": {
+                    "type": "string",
+                    "description": "Código OTP de 4 dígitos recibido por email",
+                    "pattern": "^[0-9]{4}$",
+                    "example": "1234"
                   }
                 },
                 "required": ["documento", "codigo"]
@@ -46,7 +49,7 @@
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "valido": {
+                    "success": {
                       "type": "boolean",
                       "description": "Indica si el código OTP es válido"
                     },
@@ -56,12 +59,12 @@
                       "minimum": 0,
                       "maximum": 3
                     },
-                    "mensaje": {
+                    "message": {
                       "type": "string",
                       "description": "Mensaje descriptivo del resultado"
                     }
                   },
-                  "required": ["valido", "intentosRestantes", "mensaje"]
+                  "required": ["success", "intentosRestantes", "message"]
                 }
               }
             }
@@ -73,9 +76,9 @@
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "valido": { "type": "boolean" },
+                    "success": { "type": "boolean" },
                     "intentosRestantes": { "type": "integer" },
-                    "mensaje": { "type": "string" }
+                    "message": { "type": "string" }
                   }
                 }
               }
@@ -88,7 +91,7 @@
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "valido": { 
+                    "success": { 
                       "type": "boolean",
                       "example": false
                     },
@@ -96,12 +99,12 @@
                       "type": "integer",
                       "example": 0
                     },
-                    "mensaje": { 
+                    "message": { 
                       "type": "string",
                       "example": "Error interno al procesar la validación"
                     }
                   },
-                  "required": ["valido", "intentosRestantes", "mensaje"]
+                  "required": ["success", "intentosRestantes", "message"]
                 }
               }
             }
@@ -113,9 +116,9 @@
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "valido": { "type": "boolean" },
+                    "success": { "type": "boolean" },
                     "intentosRestantes": { "type": "integer" },
-                    "mensaje": { "type": "string" }
+                    "message": { "type": "string" }
                   }
                 }
               }

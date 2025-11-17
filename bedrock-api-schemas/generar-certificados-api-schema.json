@@ -1,0 +1,249 @@
+{
+  "openapi": "3.0.0",
+  "info": {
+    "title": "Generar Certificados API",
+    "version": "1.0.0",
+    "description": "API para generar certificados de tradición y libertad para predios seleccionados (máximo 3). Los certificados son enviados automáticamente al correo electrónico del usuario."
+  },
+  "paths": {
+    "/generar-certificados": {
+      "post": {
+        "summary": "Genera certificados de tradición y libertad",
+        "description": "Genera hasta 3 certificados de tradición y libertad para los CHIPs de predios seleccionados. Los certificados son enviados automáticamente al correo electrónico del usuario y se guarda auditoría en DynamoDB.",
+        "operationId": "generarCertificados",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "documento",
+                  "tipoDocumento",
+                  "nombreCompleto"
+                ],
+                "properties": {
+                  "documento": {
+                    "type": "string",
+                    "description": "Número de documento del ciudadano (usado para recuperar el token JWT y los CHIPs seleccionados de DynamoDB)",
+                    "example": "24681012"
+                  },
+                  "tipoDocumento": {
+                    "type": "string",
+                    "description": "Tipo de documento del ciudadano (CC, CE, TI, etc.)",
+                    "example": "CC",
+                    "enum": ["CC", "CE", "TI", "PA", "RC"]
+                  },
+                  "nombreCompleto": {
+                    "type": "string",
+                    "description": "Nombre completo del ciudadano (usado para auditoría)",
+                    "example": "Juan Pérez García"
+                  },
+                  "chips": {
+                    "type": "string",
+                    "description": "OPCIONAL: CHIPs de los predios separados por comas (máximo 3). Si no se proporciona, se leen automáticamente de DynamoDB (campo chipsSeleccionados). Ejemplo: 'AAA1234,BBB5678,CCC9012'",
+                    "example": "AAA1234,BBB5678,CCC9012"
+                  },
+                  "sessionId": {
+                    "type": "string",
+                    "description": "ID de sesión de Bedrock Agent (opcional, usado como metadata)",
+                    "example": "081899001252980"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Certificados generados exitosamente",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "description": "Indica si la operación fue exitosa",
+                      "example": true
+                    },
+                    "message": {
+                      "type": "string",
+                      "description": "Mensaje descriptivo del resultado",
+                      "example": "Los 3 certificado(s) fueron generados y enviados al correo electrónico exitosamente"
+                    },
+                    "certificados": {
+                      "type": "array",
+                      "description": "Detalles de cada certificado generado",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "chip": {
+                            "type": "string",
+                            "description": "CHIP del predio",
+                            "example": "AAA1234"
+                          },
+                          "success": {
+                            "type": "boolean",
+                            "description": "Indica si el certificado fue generado exitosamente",
+                            "example": true
+                          },
+                          "requestNumber": {
+                            "type": "string",
+                            "description": "Número de radicado del certificado generado",
+                            "example": "1257322"
+                          },
+                          "message": {
+                            "type": "string",
+                            "description": "Mensaje del resultado de la generación",
+                            "example": "Certificado generado y enviado al correo exitosamente"
+                          }
+                        }
+                      }
+                    },
+                    "totalExitosos": {
+                      "type": "integer",
+                      "description": "Cantidad total de certificados generados exitosamente",
+                      "example": 3
+                    },
+                    "totalFallidos": {
+                      "type": "integer",
+                      "description": "Cantidad total de certificados que fallaron",
+                      "example": 0
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "207": {
+            "description": "Multi-Status: Algunos certificados exitosos, otros fallidos",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "message": {
+                      "type": "string",
+                      "example": "2 certificado(s) generados exitosamente, 1 fallaron. Revisa los detalles."
+                    },
+                    "certificados": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "chip": {
+                            "type": "string"
+                          },
+                          "success": {
+                            "type": "boolean"
+                          },
+                          "requestNumber": {
+                            "type": "string"
+                          },
+                          "message": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    },
+                    "totalExitosos": {
+                      "type": "integer"
+                    },
+                    "totalFallidos": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Error de validación: Falta documento, chips, o datos requeridos",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": false
+                    },
+                    "message": {
+                      "type": "string",
+                      "example": "Documento es requerido para recuperar el token de autenticación"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Token de autenticación no encontrado o expirado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": false
+                    },
+                    "message": {
+                      "type": "string",
+                      "example": "Token de autenticación no encontrado o expirado. Por favor reinicia el proceso."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Error interno del servidor",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": false
+                    },
+                    "message": {
+                      "type": "string",
+                      "example": "Error interno al procesar la generación de certificados."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Error de red o timeout al comunicarse con la API externa",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": false
+                    },
+                    "message": {
+                      "type": "string",
+                      "example": "Error técnico: timeout al generar los certificados. Por favor intenta nuevamente."
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
