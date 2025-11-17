@@ -16,7 +16,7 @@ API_KEY = os.environ.get('API_KEY', '')
 # Configuración de reintentos con exponential backoff
 MAX_RETRIES = 8
 INITIAL_BACKOFF = 1  # segundos
-MAX_BACKOFF = 20  # segundos
+MAX_BACKOFF = 60  # segundos
 
 def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     """
