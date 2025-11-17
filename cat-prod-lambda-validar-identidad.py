@@ -14,9 +14,9 @@ API_BASE_URL = os.environ.get('API_BASE_URL', 'http://vmprocondock.catastrobogot
 API_KEY = os.environ.get('API_KEY', '')
 
 # Configuración de reintentos con exponential backoff
-MAX_RETRIES = 5
+MAX_RETRIES = 8
 INITIAL_BACKOFF = 1  # segundos
-MAX_BACKOFF = 8  # segundos
+MAX_BACKOFF = 20  # segundos
 
 def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     """
@@ -63,7 +63,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 status_code=400,
                 body={
                     "success": False,
-                    "mensaje": "Parámetros requeridos faltantes: nombre, documento y tipoDocumento"
+                    "message": "Parámetros requeridos faltantes: nombre, documento y tipoDocumento"
                 },
                 event=event
             )
@@ -75,7 +75,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         api_response = call_identity_validation_api(tipo_documento, documento)
         
         # Process API response
-        if api_response['status_code'] == 200:
+        if api_response['status_code'] == 200 and api_response.get('data', {}).get('success', False) == True:
             logger.info("API respondió exitosamente con status 200")
             response_data = api_response['data']
             logger.info(f"Datos de respuesta del API: {json.dumps(response_data)}")
@@ -83,7 +83,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             # Map API response to expected schema
             validation_result = {
                 "success": response_data.get('success', False),
-                "mensaje": response_data.get('data', {}).get('mensaje', ''),
+                "message": response_data.get('data', {}).get('message', ''),
                 "correo_ofuscado": response_data.get('data', {}).get('emailOfuscado', ''),
                 "correo": "",  # Not provided by API
                 "nombre": nombre
@@ -106,7 +106,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 status_code=api_response['status_code'],
                 body={
                     "success": error_data.get('success', False),
-                    "mensaje": f"Error en la validación: {error_data.get('message', 'Error desconocido')}"
+                    "message": f"Error en la validación: {error_data.get('message', 'Error desconocido')}"
                 },
                 event=event
             )
@@ -118,7 +118,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             status_code=500,
             body={
                 "success": False,
-                "mensaje": f"Error interno del servidor: {str(e)}"
+                "message": f"Error interno del servidor: {str(e)}"
             },
             event=event
         )
@@ -188,8 +188,12 @@ def call_identity_validation_api(tipo_documento: str, numero_documento: str) -> 
                 # Si es el último intento, retornar error
                 if attempt == MAX_RETRIES - 1:
                     return {
-                        'status_code': 500,
-                        'error': 'El API retornó una respuesta vacía después de múltiples intentos'
+                        'status_code': 200,
+                        'data': {
+                            'success': False,
+                            'message': 'El API retornó una respuesta vacía después de múltiples intentos'
+                        }
+                        
                     }
                 
                 # Aplicar backoff y reintentar
@@ -217,7 +221,7 @@ def call_identity_validation_api(tipo_documento: str, numero_documento: str) -> 
                 # Si es el último intento, retornar error
                 if attempt == MAX_RETRIES - 1:
                     return {
-                        'status_code': 500,
+                        'status_code': 200,
                         'data': {
                             'success': False,
                             'message': 'Error al parsear JSON de la respuesta del API'
@@ -247,7 +251,7 @@ def call_identity_validation_api(tipo_documento: str, numero_documento: str) -> 
             if attempt == MAX_RETRIES - 1:
                 logger.error(f" Timeout después de {MAX_RETRIES} intentos")
                 return {
-                    'status_code': 504,
+                    'status_code': 200,
                     'data': {
                         'success': False,
                         'message': 'Tiempo de espera agotado al conectar con el API'
@@ -269,7 +273,7 @@ def call_identity_validation_api(tipo_documento: str, numero_documento: str) -> 
             if attempt == MAX_RETRIES - 1:
                 logger.error(f"Error de conexión después de {MAX_RETRIES} intentos")
                 return {
-                    'status_code': 503,
+                    'status_code': 200,
                     'data': {
                         'success': False,
                         'message': 'No se pudo conectar con el API'
@@ -283,14 +287,17 @@ def call_identity_validation_api(tipo_documento: str, numero_documento: str) -> 
             time.sleep(backoff_time)
             
         except requests.exceptions.RequestException as e:
+
             last_exception = e
             logger.error(f"Error en la solicitud HTTP en intento {attempt + 1}/{MAX_RETRIES}: {str(e)}")
             
             # Si es el último intento, retornar error
             if attempt == MAX_RETRIES - 1:
+
                 logger.error(f"Error en solicitud HTTP después de {MAX_RETRIES} intentos")
                 return {
-                    'status_code': 500,
+
+                    'status_code': 200,
                     'data': {
                         'success': False,
                         'message': 'Error en la solicitud HTTP al conectar con el API'
@@ -307,7 +314,7 @@ def call_identity_validation_api(tipo_documento: str, numero_documento: str) -> 
             # Para errores inesperados, no reintentar
             logger.exception(f"Error inesperado en call_identity_validation_api: {str(e)}")
             return {
-                'status_code': 500,
+                'status_code': 200,
                 'data': {
                     'success': False,
                     'message': 'Error inesperado al conectar con el API'
@@ -318,8 +325,9 @@ def call_identity_validation_api(tipo_documento: str, numero_documento: str) -> 
     # Si llegamos aquí, algo salió mal en todos los intentos
     logger.error(f"Falló después de {MAX_RETRIES} intentos")
     return {
-        'status_code': 500,
-        'error': f'Error después de {MAX_RETRIES} intentos: {str(last_exception)}'
+
+        'status_code': 200,
+        'message': f'Error después de {MAX_RETRIES} intentos: {str(last_exception)}'
     }
 
 
