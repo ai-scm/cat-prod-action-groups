@@ -17,6 +17,28 @@ logger.setLevel(logging.INFO)
 dynamodb = boto3.resource('dynamodb', region_name='us-east-1')
 TABLE_NAME = 'cat-test-certification-session-tokens'
 
+# Configuración de reintentos con exponential backoff
+MAX_RETRIES = 10
+INITIAL_BACKOFF = 1  # segundos
+MAX_BACKOFF = 60  # segundos
+
+
+def calculate_backoff(attempt):
+    """
+    Calcula el tiempo de espera usando exponential backoff
+    
+    Formula: min(INITIAL_BACKOFF * (2 ^ attempt), MAX_BACKOFF)
+    
+    Args:
+        attempt: Número de intento (0-indexed)
+    
+    Returns:
+        float: Tiempo de espera en segundos
+    """
+    backoff = INITIAL_BACKOFF * (2 ** attempt)
+    return min(backoff, MAX_BACKOFF)
+
+
 def handler(event, context):
     """
     Valida código OTP con máximo 3 intentos y guarda el token JWT en DynamoDB
@@ -29,9 +51,9 @@ def handler(event, context):
     
     Output:
     {
-        "valido": true/false,
+        "success": true/false,
         "intentosRestantes": 2,
-        "mensaje": "descripción"
+        "message": "descripción"
     }
     """
     logger.info("=== Lambda: Validar OTP ===")
@@ -71,10 +93,10 @@ def handler(event, context):
     if not documento or not codigo:
         logger.error("Documento o código vacío")
         return build_response(event, {
-            "valido": False,
+            "success": False,
             "intentosRestantes": 0,
-            "mensaje": "Documento y código son requeridos"
-        }, 400)
+            "message": "Documento y código son requeridos"
+        }, 200)
     
     # Tipo de documento ya fue validado en lambda "ValidarIdentidad" (Paso 2)
     # Si viene vacío, usar 'CC' como fallback para compatibilidad
@@ -90,9 +112,9 @@ def handler(event, context):
         api_response = call_validar_otp(documento, codigo, tipo_documento)
         
         # Procesar respuesta
-        if api_response.get('valido'):
+        if api_response.get('success'):
             # OTP CORRECTO
-            logger.info("✅ OTP validado correctamente")
+            logger.info(" OTP validado correctamente")
             
             # Guardar token en DynamoDB
             token_saved = save_token_to_dynamodb(
@@ -104,26 +126,26 @@ def handler(event, context):
             )
             
             if token_saved:
-                logger.info(f"Token guardado en DynamoDB para documento: {tipo_documento}-{documento[:3]}***")
+                logger.info(f"Token guardado en DynamoDB para session: {session_id}")
             else:
                 logger.warning("No se pudo guardar token en DynamoDB")
             
             response = {
-                "valido": True,
+                "success": True,
                 "intentosRestantes": 3,  # Resetea intentos si fue exitoso
-                "mensaje": "✅ Código OTP válido"
+                "message": " Código OTP válido"
             }
         else:
             # OTP INCORRECTO
             intentos_restantes = api_response.get('intentosRestantes', 2)
-            mensaje = api_response.get('mensaje', 'Código incorrecto')
+            message = api_response.get('message', 'Código incorrecto')
             
-            logger.warning(f"❌ OTP incorrecto. Intentos restantes: {intentos_restantes}")
+            logger.warning(f" OTP incorrecto. Intentos restantes: {intentos_restantes}")
             
             response = {
-                "valido": False,
+                "success": False,
                 "intentosRestantes": intentos_restantes,
-                "mensaje": mensaje
+                "message": message
             }
         
         logger.info(f"Response: {json.dumps(response)}")
@@ -132,31 +154,32 @@ def handler(event, context):
     except requests.exceptions.Timeout:
         logger.error("Timeout llamando a la API de validación OTP")
         return build_response(event, {
-            "valido": False,
+            "success": False,
             "intentosRestantes": 0,
-            "mensaje": "Error técnico: timeout al validar código"
-        }, 502)
+            "message": "Error técnico: timeout al validar código"
+        }, 200)
         
     except requests.exceptions.RequestException as e:
         logger.error(f"Error de red llamando a la API: {str(e)}")
         return build_response(event, {
-            "valido": False,
+            "success": False,
             "intentosRestantes": 0,
-            "mensaje": "Error técnico al validar el código"
-        }, 502)
+            "message": "Error técnico al validar el código"
+        }, 200)
         
     except Exception as e:
         logger.error(f"Error inesperado: {str(e)}", exc_info=True)
         return build_response(event, {
-            "valido": False,
+            "success": False,
             "intentosRestantes": 0,
-            "mensaje": "Error interno al procesar la validación"
-        }, 500)
+            "message": "Error interno al procesar la validación"
+        }, 200)
 
 
 def call_validar_otp(documento, codigo, tipo_documento):
     """
     Llama a la API externa para validar el código OTP
+    Implementa exponential backoff para manejar intermitencias de red.
     
     Endpoint: POST http://vmprocondock.catastrobogota.gov.co:3400/catia-auth/auth/login
     Endpoint: POST http://10.34.116.98:3400/catia-auth/auth/login
@@ -193,121 +216,211 @@ def call_validar_otp(documento, codigo, tipo_documento):
         "Content-Type": "application/json"
     }
     
-    logger.info(f"Endpoint: POST {URL}")
-    logger.info(f"Tipo documento: {tipo_documento} (heredado de ValidarIdentidad)")
-    logger.debug(f"Payload: {json.dumps(payload)}")
+    logger.info(f" Llamando API para validar OTP (con exponential backoff):")
+    logger.info(f"  - Endpoint: POST {URL}")
+    logger.info(f"  - Tipo documento: {tipo_documento} (heredado de ValidarIdentidad)")
+    logger.info(f"  - Timeout: 10 segundos")
+    logger.info(f"  - Max reintentos: {MAX_RETRIES}, Backoff inicial: {INITIAL_BACKOFF}s")
+    logger.debug(f"  - Payload: {json.dumps(payload)}")
     
-    try:
-        # Timeout de 10 segundos
-        resp = requests.post(URL, json=payload, headers=headers, timeout=10)
-        
-        logger.info(f"Respuesta recibida del API:")
-        logger.info(f"  - Status Code: {resp.status_code}")
-        logger.info(f"  - Content-Type: {resp.headers.get('Content-Type', 'N/A')}")
-        logger.info(f"  - Content-Length: {len(resp.content)} bytes")
-        logger.info(f"  - Response (primeros 300 chars): {resp.text[:300]}")
-        
-        # Validar respuesta vacía
-        if not resp.content or len(resp.content) == 0:
-            logger.error("❌ API retornó respuesta vacía")
-            return {
-                "valido": False,
-                "intentosRestantes": 0,
-                "mensaje": "Error: El servidor retornó una respuesta vacía"
-            }
-        
-        # Validar Content-Type
-        content_type = resp.headers.get('Content-Type', '')
-        if 'application/json' not in content_type.lower():
-            logger.warning(f" Content-Type no es JSON: {content_type}")
-            logger.warning(f"Respuesta completa: {resp.text[:500]}")
-        
-        # Intentar parsear JSON
+    last_exception = None
+    
+    for attempt in range(MAX_RETRIES):
         try:
-            response_data = resp.json()
-            logger.info(f"✅ JSON parseado exitosamente")
-        except ValueError:
-            logger.error(f"Respuesta no es JSON: {resp.text[:200]}")
-            return {
-                "valido": False,
-                "intentosRestantes": 0,
-                "mensaje": "Error en la respuesta del servidor"
-            }
-        
-        # CASO 1: 200 OK - OTP CORRECTO
-        if resp.status_code == 200 and response_data.get('success'):
-            data = response_data.get('data', {})
-            usuario = data.get('usuario', {})
-            token = data.get('token', '')
+            logger.info(f"--- Intento {attempt + 1}/{MAX_RETRIES} ---")
             
-            logger.info("✅ OTP VÁLIDO - API respondió exitosamente")
-            logger.info(f"Token JWT recibido:")
+            # Timeout de 10 segundos
+            resp = requests.post(URL, json=payload, headers=headers, timeout=10)
             
-            return {
-                "valido": True,
-                "intentosRestantes": 3,
-                "mensaje": "Código OTP válido",
-                "token": token,
-                "refreshToken": data.get('refreshToken', ''),
-                "tokenType": data.get('tokenType', 'Bearer'),
-                "expiresIn": data.get('expiresIn', 86400),
-                "usuario": {
-                    "nombre": usuario.get('nombre', ''),
-                    "apellido": usuario.get('apellido', ''),
-                    "email": usuario.get('email', ''),
-                    "numeroDocumento": usuario.get('numeroDocumento', documento)
+            logger.info(f"  Respuesta recibida del API:")
+            logger.info(f"  - Status Code: {resp.status_code}")
+            logger.info(f"  - Content-Type: {resp.headers.get('Content-Type', 'N/A')}")
+            logger.info(f"  - Content-Length: {len(resp.content)} bytes")
+            logger.info(f"  - Response (primeros 300 chars): {resp.text[:300]}")
+            
+            # Validar respuesta vacía
+            if not resp.content or len(resp.content) == 0:
+                logger.error(" API retornó respuesta vacía")
+                
+                if attempt == MAX_RETRIES - 1:
+                    return {
+                        "success": False,
+                        "intentosRestantes": 0,
+                        "message": "Error: El servidor retornó una respuesta vacía después de múltiples intentos"
+                    }
+                
+                backoff_time = calculate_backoff(attempt)
+                logger.warning(f" Respuesta vacía. Reintentando en {backoff_time}s...")
+                time.sleep(backoff_time)
+                continue
+            
+            # Validar Content-Type
+            content_type = resp.headers.get('Content-Type', '')
+            if 'application/json' not in content_type.lower():
+                logger.warning(f" Content-Type no es JSON: {content_type}")
+                logger.warning(f"Respuesta completa: {resp.text[:500]}")
+            
+            # Intentar parsear JSON
+            try:
+                response_data = resp.json()
+                logger.info(f" JSON parseado exitosamente")
+            except ValueError as ve:
+                logger.error(f" Respuesta no es JSON válido: {resp.text[:200]}")
+                logger.error(f"  - Error: {str(ve)}")
+                
+                if attempt == MAX_RETRIES - 1:
+                    return {
+                        "success": False,
+                        "intentosRestantes": 0,
+                        "message": "Error en la respuesta del servidor después de múltiples intentos"
+                    }
+                
+                backoff_time = calculate_backoff(attempt)
+                logger.warning(f" Error parseando JSON. Reintentando en {backoff_time}s...")
+                time.sleep(backoff_time)
+                continue
+            
+            # Si llegamos aquí, la petición fue exitosa
+            logger.info(f" Llamada al API completada exitosamente en intento {attempt + 1}")
+            
+            # CASO 1: 200 OK - OTP CORRECTO
+            if resp.status_code == 200 and response_data.get('success'):
+                data = response_data.get('data', {})
+                usuario = data.get('usuario', {})
+                token = data.get('token', '')
+                
+                logger.info(" OTP VÁLIDO - API respondió exitosamente")
+                logger.info(f" Token JWT recibido:")
+                logger.info(f"  - Longitud: {len(token)} caracteres")
+                logger.info(f"  - Primeros 30 chars: {token[:30]}...")
+                logger.info(f"  - Tipo: {data.get('tokenType', 'Bearer')}")
+                logger.info(f"  - Expira en: {data.get('expiresIn', 86400)} segundos")
+                logger.info(f" Usuario:")
+                logger.info(f"  - Nombre: {usuario.get('nombre', 'N/A')} {usuario.get('apellido', 'N/A')}")
+                logger.info(f"  - Email: {usuario.get('email', 'N/A')}")
+                
+                return {
+                    "success": True,
+                    "intentosRestantes": 3,
+                    "message": "Código OTP válido",
+                    "token": token,
+                    "refreshToken": data.get('refreshToken', ''),
+                    "tokenType": data.get('tokenType', 'Bearer'),
+                    "expiresIn": data.get('expiresIn', 86400),
+                    "usuario": {
+                        "nombre": usuario.get('nombre', ''),
+                        "apellido": usuario.get('apellido', ''),
+                        "email": usuario.get('email', ''),
+                        "numeroDocumento": usuario.get('numeroDocumento', documento)
+                    }
                 }
-            }
-        
-        # CASO 2: 400/401 - OTP INCORRECTO (con intentos restantes)
-        elif resp.status_code in [400, 401]:
-            message = response_data.get('message', '')
             
-            # Extraer intentos restantes del mensaje
-            intentos = extract_intentos_from_message(message)
+            # CASO 2: 400/401 - OTP INCORRECTO (con intentos restantes)
+            elif resp.status_code in [200, 200]:
+                message = response_data.get('message', '')
+                
+                # Extraer intentos restantes del mensaje
+                intentos = extract_intentos_from_message(message)
+                
+                # Si no se pudo extraer, verificar campo directo
+                if intentos is None:
+                    intentos = response_data.get('intentosRestantes', 2)
+                
+                return {
+                    "success": False,
+                    "intentosRestantes": intentos,
+                    "message": f" Código incorrecto. Te quedan {intentos} intento(s)"
+                }
             
-            # Si no se pudo extraer, verificar campo directo
-            if intentos is None:
-                intentos = response_data.get('intentosRestantes', 2)
+            # CASO 3: 403 - CUENTA BLOQUEADA (0 intentos)
+            elif resp.status_code == 200:
+                message = response_data.get('message', 'Ha agotado los intentos')
+                return {
+                    "success": False,
+                    "intentosRestantes": 0,
+                    "message": " Has agotado los 3 intentos. Por seguridad, debes reiniciar el proceso"
+                }
             
-            return {
-                "valido": False,
-                "intentosRestantes": intentos,
-                "mensaje": f"❌ Código incorrecto. Te quedan {intentos} intento(s)"
-            }
+            # CASO 4: OTP EXPIRADO
+            elif 'expirado' in response_data.get('message', '').lower():
+                return {
+                    "success": False,
+                    "intentosRestantes": 0,
+                    "message": " El código ha expirado. Debes solicitar uno nuevo"
+                }
+            
+            # CASO 5: OTRO ERROR
+            else:
+                logger.error(f" Status code inesperado: {resp.status_code}, Body: {response_data}")
+                return {
+                    "success": False,
+                    "intentosRestantes": 0,
+                    "message": "Error al validar el código"
+                }
         
-        # CASO 3: 403 - CUENTA BLOQUEADA (0 intentos)
-        elif resp.status_code == 403:
-            message = response_data.get('message', 'Ha agotado los intentos')
+        except requests.exceptions.Timeout as e:
+            last_exception = e
+            logger.error(f" Timeout en intento {attempt + 1}/{MAX_RETRIES} (10 segundos)")
+            
+            if attempt == MAX_RETRIES - 1:
+                logger.error(f" Timeout después de {MAX_RETRIES} intentos")
+                return {
+                    "success": False,
+                    "intentosRestantes": 0,
+                    "message": "Tiempo de espera agotado al validar el código OTP"
+                }
+            
+            backoff_time = calculate_backoff(attempt)
+            logger.warning(f" Esperando {backoff_time}s antes de reintentar...")
+            time.sleep(backoff_time)
+        
+        except requests.exceptions.ConnectionError as e:
+            last_exception = e
+            logger.error(f" Error de conexión en intento {attempt + 1}/{MAX_RETRIES}: {str(e)}")
+            
+            if attempt == MAX_RETRIES - 1:
+                logger.error(f" Error de conexión después de {MAX_RETRIES} intentos")
+                return {
+                    "success": False,
+                    "intentosRestantes": 0,
+                    "message": "No se pudo conectar con el servidor de validación"
+                }
+            
+            backoff_time = calculate_backoff(attempt)
+            logger.warning(f" Esperando {backoff_time}s antes de reintentar...")
+            time.sleep(backoff_time)
+        
+        except requests.exceptions.RequestException as e:
+            last_exception = e
+            logger.error(f" Error en la solicitud HTTP en intento {attempt + 1}/{MAX_RETRIES}: {str(e)}")
+            
+            if attempt == MAX_RETRIES - 1:
+                logger.error(f" Error en solicitud HTTP después de {MAX_RETRIES} intentos")
+                return {
+                    "success": False,
+                    "intentosRestantes": 0,
+                    "message": "Error en la solicitud al validar el código OTP"
+                }
+            
+            backoff_time = calculate_backoff(attempt)
+            logger.warning(f" Esperando {backoff_time}s antes de reintentar...")
+            time.sleep(backoff_time)
+        
+        except Exception as e:
+            logger.exception(f" Error inesperado en intento {attempt + 1}: {str(e)}")
             return {
-                "valido": False,
+                "success": False,
                 "intentosRestantes": 0,
-                "mensaje": "❌ Has agotado los 3 intentos. Por seguridad, debes reiniciar el proceso"
+                "message": "Error inesperado al validar el código OTP"
             }
-        
-        # CASO 4: OTP EXPIRADO
-        elif 'expirado' in response_data.get('message', '').lower():
-            return {
-                "valido": False,
-                "intentosRestantes": 0,
-                "mensaje": "❌ El código ha expirado. Debes solicitar uno nuevo"
-            }
-        
-        # CASO 5: OTRO ERROR
-        else:
-            logger.error(f"Status code inesperado: {resp.status_code}, Body: {response_data}")
-            return {
-                "valido": False,
-                "intentosRestantes": 0,
-                "mensaje": "Error al validar el código"
-            }
-        
-    except requests.exceptions.Timeout:
-        logger.error("Timeout en la petición")
-        raise
-    except requests.exceptions.RequestException as e:
-        logger.error(f"Error de red: {str(e)}")
-        raise
+    
+    # Si llegamos aquí, algo salió mal en todos los intentos
+    logger.error(f" Falló después de {MAX_RETRIES} intentos")
+    return {
+        "success": False,
+        "intentosRestantes": 0,
+        "message": f"Error después de {MAX_RETRIES} intentos al validar el código OTP: {str(last_exception)}"
+    }
 
 
 def extract_intentos_from_message(message):
@@ -351,15 +464,15 @@ def save_token_to_dynamodb(session_id, token, documento, tipo_documento, usuario
     Returns:
         bool: True si se guardó correctamente, False si hubo error
     """
-    logger.info("Intentando guardar token en DynamoDB...")
+    logger.info(" Intentando guardar token en DynamoDB...")
     logger.info(f"  - Tabla: {TABLE_NAME}")
-    logger.info(f"  - Documento (PK): {tipo_documento}-{documento[:3] if documento else ''}***")
+    logger.info(f"  - SessionId: {session_id if session_id else '[VACÍO]'}")
     logger.info(f"  - Token (longitud): {len(token) if token else 0} caracteres")
-    logger.info(f"  - SessionId (metadata): {session_id if session_id else '[VACÍO]'}")
+    logger.info(f"  - Documento: {tipo_documento}-{documento[:3] if documento else ''}***")
     
-    if not documento or not token:
-        logger.error("❌ FALLO al guardar token - Validación de entrada")
-        logger.error(f"  - Documento vacío: {not documento}")
+    if not session_id or not token:
+        logger.error(" FALLO al guardar token - Validación de entrada")
+        logger.error(f"  - SessionId vacío: {not session_id}")
         logger.error(f"  - Token vacío: {not token}")
         return False
     
@@ -370,9 +483,9 @@ def save_token_to_dynamodb(session_id, token, documento, tipo_documento, usuario
         ttl_timestamp = int(time.time()) + 600
         
         item = {
-            'documento': documento,  # ← PARTITION KEY (PK)
+            'documento': documento,           # PK - Primary Key
+            'sessionId': session_id,          # Metadata de Bedrock Agent
             'token': token,
-            'sessionId': session_id,  # ← Guardado como metadata
             'tipoDocumento': tipo_documento,
             'tokenType': 'Bearer',
             'createdAt': int(time.time()),
@@ -390,23 +503,23 @@ def save_token_to_dynamodb(session_id, token, documento, tipo_documento, usuario
         
         table.put_item(Item=item)
         
-        logger.info("✅ Token guardado exitosamente en DynamoDB")
-        logger.info(f"  - Documento (PK): {tipo_documento}-{documento[:3]}***")
-        logger.info(f"  - SessionId (metadata): {session_id}")
+        logger.info(" Token guardado exitosamente en DynamoDB")
+        logger.info(f"  - SessionId: {session_id}")
         logger.info(f"  - TTL: {ttl_timestamp} ({600} segundos = 10 minutos)")
+        logger.info(f"  - Documento: {tipo_documento}-{documento[:3]}***")
         logger.info(f"  - Usuario: {usuario.get('nombre', 'N/A')} {usuario.get('apellido', 'N/A')}")
         return True
         
     except ClientError as e:
         error_code = e.response['Error']['Code']
         error_message = e.response['Error']['Message']
-        logger.error(f"❌ Error de DynamoDB: {error_code}")
+        logger.error(f" Error de DynamoDB: {error_code}")
         logger.error(f"  - Mensaje: {error_message}")
         logger.error(f"  - Tabla: {TABLE_NAME}")
-        logger.error(f"  - Documento (PK): {tipo_documento}-{documento[:3] if documento else ''}***")
+        logger.error(f"  - SessionId: {session_id}")
         return False
     except Exception as e:
-        logger.error(f"❌ Error inesperado guardando token")
+        logger.error(f" Error inesperado guardando token")
         logger.error(f"  - Tipo de error: {type(e).__name__}")
         logger.error(f"  - Mensaje: {str(e)}")
         logger.exception("Stack trace completo:")
