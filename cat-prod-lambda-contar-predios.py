@@ -64,7 +64,7 @@ def lambda_handler(event, context):
             # Formato directo para testing
             documento = event.get('documento', '')
         
-        
+        session_id = event.get('sessionId', 'N/A')
         logger.info(f"Parámetros extraídos - Documento: {documento[:3] if documento else ''}***, SessionId: {session_id}")
         
         # Validación de inputs
@@ -633,7 +633,7 @@ def validate_token(documento):
                 'message': f'Error inesperado al conectar con el API: {str(e)}'
             }
  
- 
+
 #============================
 #  Refresh token logic
 # =========================== 
