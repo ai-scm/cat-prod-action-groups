@@ -64,8 +64,6 @@ def lambda_handler(event, context):
             # Formato directo para testing
             documento = event.get('documento', '')
         
-        # Obtener sessionId para recuperar token
-        session_id = event.get('sessionId', '')
         
         logger.info(f"Parámetros extraídos - Documento: {documento[:3] if documento else ''}***, SessionId: {session_id}")
         
@@ -123,7 +121,7 @@ def lambda_handler(event, context):
                 }
             )
         
-        logger.info("✅ Token recuperado de DynamoDB")
+        logger.info("Token recuperado de DynamoDB")
 
         
         # Llamar a la API de conteo de predios
@@ -508,6 +506,8 @@ def validate_token(documento):
         "Authorization": f"Bearer {token}"
     }
 
+    last_exception = None
+
     for attempt in range(MAX_RETRIES):
         try:
             #Llamar al endpoint de validación de token
@@ -526,11 +526,8 @@ def validate_token(documento):
                 if attempt == MAX_RETRIES - 1:
                     return {
                         'status_code': 200,
-                        'data': {
-                            'success': False,
-                            'message': 'Error al parsear JSON de la respuesta del API'
-                        },
-                        'error': f'Respuesta del API no es un JSON válido después de múltiples intentos. Content-Type: {content_type}, Content: {response.text[:200]}'
+                        'success': False,
+                        'message': 'Error al parsear JSON de la respuesta del API'
                     }
                 
                 # Aplicar backoff y reintentar
@@ -571,50 +568,72 @@ def validate_token(documento):
                         'message': refresh_token_response.get('message', 'Error al refrescar el token')
                     }
 
-        except requests.exceptions.RequestException as e:
-            logger.error(f"Error validando token en intento {attempt + 1}/{MAX_RETRIES}: {str(e)}")
-
+        except requests.exceptions.Timeout as e:
+            last_exception = e
+            logger.error(f"Timeout en intento {attempt + 1}/{MAX_RETRIES} (30 segundos)")
+            
+            # Si es el último intento, retornar error
             if attempt == MAX_RETRIES - 1:
-                logger.error(f"Error validando token después de {MAX_RETRIES} intentos")
-                return False
-
+                logger.error(f" Timeout después de {MAX_RETRIES} intentos")
+                return {
+                    'status_code': 200,
+                    'success': False,
+                    'message': f'Tiempo de espera agotado al conectar con el API: {str(e)}'  
+                }
+            
+            # Aplicar exponential backoff
             backoff_time = calculate_backoff(attempt)
-            logger.warning(f"Esperando {backoff_time}s antes de reintentar...")
+            logger.warning(f"⏳ Esperando {backoff_time}s antes de reintentar...")
             time.sleep(backoff_time)
-        
-        except requests.exceptions.Timeout:
-            logger.error(f"Timeout validando token en intento {attempt + 1}/{MAX_RETRIES}")
-
-            if attempt == MAX_RETRIES - 1:
-                logger.error(f"Timeout validando token después de {MAX_RETRIES} intentos")
-                return False
-
-            backoff_time = calculate_backoff(attempt)
-            logger.warning(f"Esperando {backoff_time}s antes de reintentar...")
-            time.sleep(backoff_time)
-
+            
         except requests.exceptions.ConnectionError as e:
-            logger.error(f"Error de conexión validando token en intento {attempt + 1}/{MAX_RETRIES}: {str(e)}")
-
+            last_exception = e
+            logger.error(f"Error de conexión en intento {attempt + 1}/{MAX_RETRIES}: {str(e)}")
+            
+            # Si es el último intento, retornar error
             if attempt == MAX_RETRIES - 1:
-                logger.error(f"Error de conexión validando token después de {MAX_RETRIES} intentos")
-                return False
-
+                logger.error(f"Error de conexión después de {MAX_RETRIES} intentos")
+                return {
+                    'status_code': 200,
+                    'success': False,
+                    'message': 'No se pudo conectar con el API'
+                }
+            
+            # Aplicar exponential backoff
             backoff_time = calculate_backoff(attempt)
             logger.warning(f"Esperando {backoff_time}s antes de reintentar...")
             time.sleep(backoff_time)
-        
+            
         except requests.exceptions.RequestException as e:
-            logger.error(f"Error de red validando token en intento {attempt + 1}/{MAX_RETRIES}: {str(e)}")
 
+            last_exception = e
+            logger.error(f"Error en la solicitud HTTP en intento {attempt + 1}/{MAX_RETRIES}: {str(e)}")
+            
+            # Si es el último intento, retornar error
             if attempt == MAX_RETRIES - 1:
-                logger.error(f"Error de red validando token después de {MAX_RETRIES} intentos")
-                return False
 
+                logger.error(f"Error en solicitud HTTP después de {MAX_RETRIES} intentos")
+                return {
+                    'status_code': 200,
+                    'success': False,
+                    'message': 'Error en la solicitud HTTP al conectar con el API'
+                }
+            
+            # Aplicar exponential backoff
             backoff_time = calculate_backoff(attempt)
             logger.warning(f"Esperando {backoff_time}s antes de reintentar...")
             time.sleep(backoff_time)
-
+            
+        except Exception as e:
+            # Para errores inesperados, no reintentar
+            logger.exception(f"Error inesperado en call_identity_validation_api: {str(e)}")
+            return {
+                'status_code': 200,
+                'success': False,
+                'message': f'Error inesperado al conectar con el API: {str(e)}'
+            }
+ 
+ 
 #============================
 #  Refresh token logic
 # =========================== 

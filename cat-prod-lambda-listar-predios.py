@@ -141,7 +141,7 @@ def handler(event, context):
             }, 401)
         
         logger.info("Token recuperado de DynamoDB")
-        
+
         # 2. Listar predios desde la API
         logger.info(f" PASO 2: Obteniendo lista de predios desde la API...")
         api_response = listar_predios_api(token)
@@ -221,42 +221,6 @@ def handler(event, context):
         }, 200)
 
 
-def get_token_from_dynamodb(documento):
-    """
-    Recupera el token JWT desde DynamoDB usando el sessionId
-    
-    Args:
-        documento: Numero de documento del usuario
-    
-    Returns:
-        dict: Item de DynamoDB con el token o None si no se encuentra
-    """
-    if not documento:
-        logger.warning("Documento vacío, no se puede recuperar token")
-        return None
-    
-    try:
-        table = dynamodb.Table(TABLE_NAME)
-        
-        logger.info(f"Buscando token en DynamoDB para documento: {documento}")
-        response = table.get_item(Key={'documento': documento})
-        
-        if 'Item' in response:
-            token_dict = response['Item']
-            token = response['Item'].get('token', '')
-            logger.info(f"✅ Token encontrado en DynamoDB para documento: {documento}")
-            logger.debug(f"Token (primeros 20 chars): {token[:20]}...")
-            return token_dict
-        else:
-            logger.warning(f"⚠️ No se encontró token para documento: {documento}")
-            return None
-            
-    except ClientError as e:
-        logger.error(f"Error de DynamoDB: {e.response['Error']['Message']}")
-        return None
-    except Exception as e:
-        logger.error(f"Error recuperando token: {str(e)}", exc_info=True)
-        return None
 
 
 def listar_predios_api(token):
@@ -505,6 +469,44 @@ def build_response(event, response_data, status_code=200):
     logger.info(" Respuesta formateada correctamente")
     return formatted_response
 
+
+def get_token_from_dynamodb(documento):
+    """
+    Recupera el token JWT desde DynamoDB usando el sessionId
+    
+    Args:
+        documento: Numero de documento del usuario
+    
+    Returns:
+        dict: Item de DynamoDB con el token o None si no se encuentra
+    """
+    if not documento:
+        logger.warning("Documento vacío, no se puede recuperar token")
+        return None
+    
+    try:
+        table = dynamodb.Table(TABLE_NAME)
+        
+        logger.info(f"Buscando token en DynamoDB para documento: {documento}")
+        response = table.get_item(Key={'documento': documento})
+        
+        if 'Item' in response:
+            token_dict = response['Item']
+            token = response['Item'].get('token', '')
+            logger.info(f"✅ Token encontrado en DynamoDB para documento: {documento}")
+            logger.debug(f"Token (primeros 20 chars): {token[:20]}...")
+            return token_dict
+        else:
+            logger.warning(f"⚠️ No se encontró token para documento: {documento}")
+            return None
+            
+    except ClientError as e:
+        logger.error(f"Error de DynamoDB: {e.response['Error']['Message']}")
+        return None
+    except Exception as e:
+        logger.error(f"Error recuperando token: {str(e)}", exc_info=True)
+        return None
+
 #============================
 #  Validate token logic
 # =========================== 
@@ -532,6 +534,8 @@ def validate_token(documento):
         "Authorization": f"Bearer {token}"
     }
 
+    last_exception = None
+
     for attempt in range(MAX_RETRIES):
         try:
             #Llamar al endpoint de validación de token
@@ -550,11 +554,8 @@ def validate_token(documento):
                 if attempt == MAX_RETRIES - 1:
                     return {
                         'status_code': 200,
-                        'data': {
-                            'success': False,
-                            'message': 'Error al parsear JSON de la respuesta del API'
-                        },
-                        'error': f'Respuesta del API no es un JSON válido después de múltiples intentos. Content-Type: {content_type}, Content: {response.text[:200]}'
+                        'success': False,
+                        'message': 'Error al parsear JSON de la respuesta del API'
                     }
                 
                 # Aplicar backoff y reintentar
@@ -595,50 +596,71 @@ def validate_token(documento):
                         'message': refresh_token_response.get('message', 'Error al refrescar el token')
                     }
 
-        except requests.exceptions.RequestException as e:
-            logger.error(f"Error validando token en intento {attempt + 1}/{MAX_RETRIES}: {str(e)}")
-
+        except requests.exceptions.Timeout as e:
+            last_exception = e
+            logger.error(f"Timeout en intento {attempt + 1}/{MAX_RETRIES} (30 segundos)")
+            
+            # Si es el último intento, retornar error
             if attempt == MAX_RETRIES - 1:
-                logger.error(f"Error validando token después de {MAX_RETRIES} intentos")
-                return False
-
+                logger.error(f" Timeout después de {MAX_RETRIES} intentos")
+                return {
+                    'status_code': 200,
+                    'success': False,
+                    'message': f'Tiempo de espera agotado al conectar con el API: {str(e)}'  
+                }
+            
+            # Aplicar exponential backoff
             backoff_time = calculate_backoff(attempt)
-            logger.warning(f"Esperando {backoff_time}s antes de reintentar...")
+            logger.warning(f"⏳ Esperando {backoff_time}s antes de reintentar...")
             time.sleep(backoff_time)
-        
-        except requests.exceptions.Timeout:
-            logger.error(f"Timeout validando token en intento {attempt + 1}/{MAX_RETRIES}")
-
-            if attempt == MAX_RETRIES - 1:
-                logger.error(f"Timeout validando token después de {MAX_RETRIES} intentos")
-                return False
-
-            backoff_time = calculate_backoff(attempt)
-            logger.warning(f"Esperando {backoff_time}s antes de reintentar...")
-            time.sleep(backoff_time)
-
+            
         except requests.exceptions.ConnectionError as e:
-            logger.error(f"Error de conexión validando token en intento {attempt + 1}/{MAX_RETRIES}: {str(e)}")
-
+            last_exception = e
+            logger.error(f"Error de conexión en intento {attempt + 1}/{MAX_RETRIES}: {str(e)}")
+            
+            # Si es el último intento, retornar error
             if attempt == MAX_RETRIES - 1:
-                logger.error(f"Error de conexión validando token después de {MAX_RETRIES} intentos")
-                return False
-
+                logger.error(f"Error de conexión después de {MAX_RETRIES} intentos")
+                return {
+                    'status_code': 200,
+                    'success': False,
+                    'message': 'No se pudo conectar con el API'
+                }
+            
+            # Aplicar exponential backoff
             backoff_time = calculate_backoff(attempt)
             logger.warning(f"Esperando {backoff_time}s antes de reintentar...")
             time.sleep(backoff_time)
-        
+            
         except requests.exceptions.RequestException as e:
-            logger.error(f"Error de red validando token en intento {attempt + 1}/{MAX_RETRIES}: {str(e)}")
 
+            last_exception = e
+            logger.error(f"Error en la solicitud HTTP en intento {attempt + 1}/{MAX_RETRIES}: {str(e)}")
+            
+            # Si es el último intento, retornar error
             if attempt == MAX_RETRIES - 1:
-                logger.error(f"Error de red validando token después de {MAX_RETRIES} intentos")
-                return False
 
+                logger.error(f"Error en solicitud HTTP después de {MAX_RETRIES} intentos")
+                return {
+                    'status_code': 200,
+                    'success': False,
+                    'message': 'Error en la solicitud HTTP al conectar con el API'
+                }
+            
+            # Aplicar exponential backoff
             backoff_time = calculate_backoff(attempt)
             logger.warning(f"Esperando {backoff_time}s antes de reintentar...")
             time.sleep(backoff_time)
-
+            
+        except Exception as e:
+            # Para errores inesperados, no reintentar
+            logger.exception(f"Error inesperado en call_identity_validation_api: {str(e)}")
+            return {
+                'status_code': 200,
+                'success': False,
+                'message': f'Error inesperado al conectar con el API: {str(e)}'
+            }
+ 
 #============================
 #  Refresh token logic
 # =========================== 
