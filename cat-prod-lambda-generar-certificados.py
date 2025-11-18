@@ -9,6 +9,7 @@ import logging
 import requests
 import boto3
 import uuid
+import time
 from datetime import datetime
 from botocore.exceptions import ClientError
 
@@ -23,8 +24,29 @@ TABLE_AUDITORIA = 'cat-test-certification-data'
 # Base URL de la API
 API_BASE_URL = "http://vmprocondock.catastrobogota.gov.co:3400/catia-auth"
 
+# Configuración de reintentos con exponential backoff
+MAX_RETRIES = 10
+INITIAL_BACKOFF = 1  # segundos
+MAX_BACKOFF = 60  # segundos
+
 # Límite de certificados por solicitud
 MAX_CERTIFICADOS = 3
+
+
+def calculate_backoff(attempt):
+    """
+    Calcula el tiempo de espera usando exponential backoff
+    
+    Formula: min(INITIAL_BACKOFF * (2 ^ attempt), MAX_BACKOFF)
+    
+    Args:
+        attempt: Número de intento (0-indexed)
+    
+    Returns:
+        float: Tiempo de espera en segundos
+    """
+    backoff = INITIAL_BACKOFF * (2 ** attempt)
+    return min(backoff, MAX_BACKOFF)
 
 
 def handler(event, context):
@@ -33,21 +55,20 @@ def handler(event, context):
     
     Input esperado (OPCIÓN 1 - Con CHIPs explícitos, para flujo ListarPredios):
     {
-        "documento": "1234567890",  // REQUERIDO - Para recuperar token JWT
+        "documento": "1234567890",  // REQUERIDO - Para recuperar token JWT y datos de usuario
         "tipoDocumento": "CC",  // REQUERIDO - Para auditoría
-        "nombreCompleto": "Juan Pérez García",  // REQUERIDO - Para auditoría
         "chips": ["AAA1234", "BBB5678", "CCC9012"],  // OPCIONAL - Si se proporciona, se usa esto
         "sessionId": "xxx"  // Opcional - Metadata
     }
     
     Input esperado (OPCIÓN 2 - Sin CHIPs, para flujo BuscarPredios):
     {
-        "documento": "1234567890",  // REQUERIDO - Para recuperar token JWT y CHIPs de DynamoDB
+        "documento": "1234567890",  // REQUERIDO - Para recuperar token JWT, CHIPs y datos de usuario de DynamoDB
         "tipoDocumento": "CC",  // REQUERIDO - Para auditoría
-        "nombreCompleto": "Juan Pérez García",  // REQUERIDO - Para auditoría
         "sessionId": "xxx"  // Opcional - Metadata
     }
     // En este caso, los CHIPs se leen automáticamente de DynamoDB (campo chipsSeleccionados)
+    // El nombreCompleto se construye automáticamente desde usuario.nombre + usuario.apellido
     
     Output:
     {
@@ -67,7 +88,7 @@ def handler(event, context):
     }
     """
     logger.info("=== Lambda: Generar Certificados ===")
-    logger.info(f"📋 Event recibido: {json.dumps(event, ensure_ascii=False)}")
+    logger.info(f" Event recibido: {json.dumps(event, ensure_ascii=False)}")
     
     # Extraer parámetros - Bedrock Agent envía en requestBody
     if 'requestBody' in event and 'content' in event['requestBody']:
@@ -79,7 +100,6 @@ def handler(event, context):
             # Extraer parámetros requeridos
             documento = body.get('documento', '')
             tipo_documento = body.get('tipoDocumento', '')
-            nombre_completo = body.get('nombreCompleto', '')
             
             # CHIPs puede venir como string separado por comas o como lista
             chips_raw = body.get('chips', '')
@@ -95,14 +115,12 @@ def handler(event, context):
         else:
             documento = ''
             tipo_documento = ''
-            nombre_completo = ''
             chips = []
             session_id = event.get('sessionId', '')
     else:
         # Formato directo para testing
         documento = event.get('documento', '')
         tipo_documento = event.get('tipoDocumento', '')
-        nombre_completo = event.get('nombreCompleto', '')
         chips = event.get('chips', [])
         session_id = event.get('sessionId', '')
     
@@ -110,7 +128,6 @@ def handler(event, context):
     logger.info(" Parámetros extraídos del evento:")
     logger.info(f"  - documento (PK): {documento[:5] if documento else '[VACÍO]'}*** (longitud: {len(documento)})")
     logger.info(f"  - tipoDocumento: {tipo_documento if tipo_documento else '[VACÍO]'}")
-    logger.info(f"  - nombreCompleto: {nombre_completo[:20] if nombre_completo else '[VACÍO]'}...")
     logger.info(f"  - chips: {chips}")
     logger.info(f"  - cantidad de CHIPs: {len(chips)}")
     logger.info(f"  - sessionId (metadata): {session_id[:15] if session_id else '[VACÍO]'}***")
@@ -121,21 +138,14 @@ def handler(event, context):
         return build_response(event, {
             "success": False,
             "message": "Documento es requerido para recuperar el token de autenticación"
-        }, 400)
+        }, 200)
     
     if not tipo_documento:
         logger.error("❌ Tipo de documento vacío")
         return build_response(event, {
             "success": False,
             "message": "Tipo de documento es requerido para la auditoría"
-        }, 400)
-    
-    if not nombre_completo:
-        logger.error("❌ Nombre completo vacío")
-        return build_response(event, {
-            "success": False,
-            "message": "Nombre completo es requerido para la auditoría"
-        }, 400)
+        }, 200)
     
     # Si no se proporcionaron CHIPs como parámetro, leerlos de DynamoDB
     if not chips or len(chips) == 0:
@@ -147,7 +157,7 @@ def handler(event, context):
             return build_response(event, {
                 "success": False,
                 "message": "No has seleccionado ningún predio. Por favor busca y selecciona al menos un predio antes de generar certificados."
-            }, 400)
+            }, 200)
         
         logger.info(f"✅ CHIPs recuperados de DynamoDB: {chips}")
         logger.info(f"  - Total de CHIPs: {len(chips)}")
@@ -164,12 +174,12 @@ def handler(event, context):
     logger.info(f"  - CHIPs a procesar: {chips}")
     
     try:
-        # 1. Obtener token JWT de DynamoDB
-        logger.info(" PASO 1: Recuperando token JWT de DynamoDB...")
-        token = get_token_from_dynamodb(documento)
+        # 1. Obtener token JWT y datos de usuario de DynamoDB
+        logger.info(" PASO 1: Recuperando token JWT y datos de usuario de DynamoDB...")
+        session_data = get_session_data_from_dynamodb(documento)
         
-        if not token:
-            logger.error("❌ Token no encontrado en DynamoDB")
+        if not session_data:
+            logger.error("❌ Datos de sesión no encontrados en DynamoDB")
             logger.error("  - Posibles causas:")
             logger.error("    1. Token expiró (TTL de 10 minutos)")
             logger.error("    2. Documento incorrecto")
@@ -177,7 +187,25 @@ def handler(event, context):
             return build_response(event, {
                 "success": False,
                 "message": "Token de autenticación no encontrado o expirado. Por favor reinicia el proceso."
-            }, 401)
+            }, 200)
+        
+        token = session_data.get('token', '')
+        usuario = session_data.get('usuario', {})
+        
+        # Construir nombre completo desde usuario.nombre + usuario.apellido
+        nombre = usuario.get('nombre', '')
+        apellido = usuario.get('apellido', '')
+        nombre_completo = f"{nombre} {apellido}".strip()
+        
+        if not nombre_completo:
+            logger.warning("⚠️ No se pudo construir nombre completo desde DynamoDB")
+            nombre_completo = "Nombre no disponible"
+        
+        logger.info(f"✅ Datos de usuario recuperados:")
+        logger.info(f"  - Nombre: {nombre}")
+        logger.info(f"  - Apellido: {apellido}")
+        logger.info(f"  - Nombre completo construido: {nombre_completo}")
+        logger.info(f"  - Email: {usuario.get('email', 'N/A')}")
         
         # 2. Generar certificados para cada CHIP
         logger.info(f" PASO 2: Generando certificados para {len(chips)} CHIP(s)...")
@@ -246,14 +274,14 @@ def handler(event, context):
             "totalFallidos": fallidos
         }
         
-        return build_response(event, response, 200 if success else 207)  # 207 = Multi-Status
+        return build_response(event, response, 200 if success else 200)  # 207 = Multi-Status
         
     except requests.exceptions.Timeout:
         logger.error("❌ TIMEOUT: API no respondió a tiempo")
         return build_response(event, {
             "success": False,
             "message": "Error técnico: timeout al generar los certificados. Por favor intenta nuevamente."
-        }, 502)
+        }, 200)
         
     except requests.exceptions.RequestException as e:
         logger.error(f"❌ ERROR DE RED")
@@ -262,7 +290,7 @@ def handler(event, context):
         return build_response(event, {
             "success": False,
             "message": "Error técnico al generar los certificados. Verifica tu conexión."
-        }, 502)
+        }, 200)
         
     except Exception as e:
         logger.error(f"❌ ERROR INESPERADO")
@@ -272,24 +300,37 @@ def handler(event, context):
         return build_response(event, {
             "success": False,
             "message": "Error interno al procesar la generación de certificados."
-        }, 500)
+        }, 200)
 
 
-def get_token_from_dynamodb(documento):
+def get_session_data_from_dynamodb(documento):
     """
-    Recupera el token JWT desde DynamoDB usando el documento.
+    Recupera los datos completos de sesión desde DynamoDB usando el documento.
+    Incluye: token JWT, datos de usuario (nombre, apellido, email), chipsSeleccionados, etc.
     
     Args:
         documento: Número de documento del ciudadano (PK en DynamoDB)
     
     Returns:
-        str: Token JWT o None si no se encuentra
+        dict: Datos completos de la sesión o None si no se encuentra
+        {
+            'token': 'JWT...',
+            'usuario': {
+                'nombre': 'Juan',
+                'apellido': 'Pérez',
+                'email': 'juan@example.com',
+                'numeroDocumento': '1234567890'
+            },
+            'chipsSeleccionados': ['AAA1234', 'BBB5678'],
+            'tipoDocumento': 'CC',
+            ...
+        }
     """
     if not documento:
-        logger.warning("⚠️ Documento vacío")
+        logger.warning(" Documento vacío")
         return None
     
-    logger.info("💾 Recuperando token de DynamoDB...")
+    logger.info(" Recuperando datos de sesión de DynamoDB...")
     logger.info(f"  - Tabla: {TABLE_TOKENS}")
     logger.info(f"  - Documento (PK): {documento[:3]}*** (longitud: {len(documento)})")
     
@@ -299,7 +340,7 @@ def get_token_from_dynamodb(documento):
         response = table.get_item(Key={'documento': documento})
         
         if 'Item' not in response:
-            logger.warning(f"⚠️ No se encontró token en DynamoDB")
+            logger.warning(f" No se encontró sesión en DynamoDB")
             logger.warning(f"  - Documento: {documento[:3]}***")
             return None
         
@@ -307,25 +348,27 @@ def get_token_from_dynamodb(documento):
         token = item.get('token', '')
         
         if not token:
-            logger.warning("⚠️ Token vacío en DynamoDB")
+            logger.warning(" Token vacío en DynamoDB")
             return None
         
-        logger.info(f"✅ Token recuperado exitosamente")
+        logger.info(f" Datos de sesión recuperados exitosamente")
         logger.info(f"  - Token (longitud): {len(token)} caracteres")
         logger.info(f"  - Token (primeros 30 chars): {token[:30]}***")
+        logger.info(f"  - Usuario presente: {'usuario' in item}")
+        logger.info(f"  - CHIPs seleccionados: {len(item.get('chipsSeleccionados', []))}")
         logger.info(f"  - Documento: {documento[:3]}***")
         
-        return token
+        return item
         
     except ClientError as e:
         error_code = e.response['Error']['Code']
         error_message = e.response['Error']['Message']
-        logger.error(f"❌ Error de DynamoDB: {error_code}")
+        logger.error(f" Error de DynamoDB: {error_code}")
         logger.error(f"  - Mensaje: {error_message}")
         logger.error(f"  - Documento: {documento[:3]}***")
         return None
     except Exception as e:
-        logger.error(f"❌ Error inesperado obteniendo token")
+        logger.error(f" Error inesperado obteniendo datos de sesión")
         logger.error(f"  - Tipo: {type(e).__name__}")
         logger.error(f"  - Mensaje: {str(e)}")
         logger.exception("Stack trace completo:")
@@ -344,10 +387,10 @@ def obtener_chips_seleccionados_desde_dynamo(documento):
         list: Lista de CHIPs seleccionados, o lista vacía si no hay
     """
     if not documento:
-        logger.warning("⚠️ Documento vacío")
+        logger.warning(" Documento vacío")
         return []
     
-    logger.info("💾 Recuperando CHIPs seleccionados de DynamoDB...")
+    logger.info(" Recuperando CHIPs seleccionados de DynamoDB...")
     logger.info(f"  - Tabla: {TABLE_TOKENS}")
     logger.info(f"  - Documento (PK): {documento[:3]}*** (longitud: {len(documento)})")
     
@@ -357,7 +400,7 @@ def obtener_chips_seleccionados_desde_dynamo(documento):
         response = table.get_item(Key={'documento': documento})
         
         if 'Item' not in response:
-            logger.warning(f"⚠️ No se encontró registro en DynamoDB")
+            logger.warning(f" No se encontró registro en DynamoDB")
             logger.warning(f"  - Documento: {documento[:3]}***")
             logger.warning(f"  - Posibles causas:")
             logger.warning(f"    1. Sesión expirada (TTL de 10 minutos)")
@@ -370,10 +413,10 @@ def obtener_chips_seleccionados_desde_dynamo(documento):
         
         # Asegurar que sea una lista
         if not isinstance(chips_seleccionados, list):
-            logger.warning(f"⚠️ chipsSeleccionados no es una lista, es: {type(chips_seleccionados)}")
+            logger.warning(f" chipsSeleccionados no es una lista, es: {type(chips_seleccionados)}")
             chips_seleccionados = []
         
-        logger.info(f"✅ CHIPs seleccionados recuperados exitosamente")
+        logger.info(f" CHIPs seleccionados recuperados exitosamente")
         logger.info(f"  - Total de CHIPs: {len(chips_seleccionados)}")
         logger.info(f"  - CHIPs: {chips_seleccionados}")
         logger.info(f"  - Documento: {documento[:3]}***")
@@ -383,12 +426,12 @@ def obtener_chips_seleccionados_desde_dynamo(documento):
     except ClientError as e:
         error_code = e.response['Error']['Code']
         error_message = e.response['Error']['Message']
-        logger.error(f"❌ Error de DynamoDB: {error_code}")
+        logger.error(f" Error de DynamoDB: {error_code}")
         logger.error(f"  - Mensaje: {error_message}")
         logger.error(f"  - Documento: {documento[:3]}***")
         return []
     except Exception as e:
-        logger.error(f"❌ Error inesperado obteniendo CHIPs seleccionados")
+        logger.error(f" Error inesperado obteniendo CHIPs seleccionados")
         logger.error(f"  - Tipo: {type(e).__name__}")
         logger.error(f"  - Mensaje: {str(e)}")
         logger.exception("Stack trace completo:")
@@ -397,8 +440,8 @@ def obtener_chips_seleccionados_desde_dynamo(documento):
 
 def generar_certificado(token, chip):
     """
-    Genera un certificado de tradición y libertad para un CHIP específico.
     El certificado es enviado automáticamente al correo del usuario.
+    Implementa exponential backoff para manejar intermitencias de red.
     
     Endpoint: GET /reports/certification/property/{chip}
     Ejemplo: http://vmprocondock.catastrobogota.gov.co:3400/catia-auth/reports/certification/property/AAA1234
@@ -420,106 +463,160 @@ def generar_certificado(token, chip):
         "Accept": "application/json"
     }
     
-    logger.info(f"📞 Llamando API de generación de certificado:")
+    logger.info(f"=== Llamando API de generación de certificado (con exponential backoff) ===")
     logger.info(f"  - Endpoint: GET {URL}")
     logger.info(f"  - CHIP: {chip_limpio}")
     logger.info(f"  - Authorization: Bearer {token[:30]}***")
-    logger.info(f"  - Timeout: 30 segundos")
+    logger.info(f"  - Max reintentos: {MAX_RETRIES}, Backoff inicial: {INITIAL_BACKOFF}s")
     
-    try:
-        resp = requests.get(URL, headers=headers, timeout=30)  # Mayor timeout para generación
-        
-        logger.info(f" Respuesta recibida:")
-        logger.info(f"  - Status Code: {resp.status_code}")
-        logger.info(f"  - Content-Type: {resp.headers.get('Content-Type', 'N/A')}")
-        logger.info(f"  - Content-Length: {len(resp.content)} bytes")
-        
-        # Validar respuesta vacía
-        if not resp.content or len(resp.content) == 0:
-            logger.error("❌ API retornó respuesta vacía")
-            return {
-                "success": False,
-                "message": "El servidor retornó una respuesta vacía",
-                "requestNumber": ""
-            }
-        
-        # Validar Content-Type
-        content_type = resp.headers.get('Content-Type', '')
-        if 'application/json' not in content_type.lower():
-            logger.warning(f"⚠️ Content-Type no es JSON: {content_type}")
-        
-        # Parsear JSON
+    last_exception = None
+    
+    for attempt in range(MAX_RETRIES):
         try:
-            response_data = resp.json()
-            logger.info(f"✅ JSON parseado exitosamente")
-            logger.info(f"  - Claves: {list(response_data.keys())}")
-            logger.info(f"  - Success: {response_data.get('success', 'N/A')}")
-            logger.info(f"  - Message: {response_data.get('message', 'N/A')}")
-        except ValueError as ve:
-            logger.error(f"❌ Respuesta no es JSON válido")
-            logger.error(f"  - Error: {str(ve)}")
-            logger.error(f"  - Respuesta (primeros 300 chars): {resp.text[:300]}")
-            return {
-                "success": False,
-                "message": "Respuesta inválida del servidor",
-                "requestNumber": ""
-            }
-        
-        # Procesar respuesta según status code
-        if resp.status_code == 200:
-            logger.info("✅ Status 200 - Certificado generado exitosamente")
+            logger.info(f"--- Intento {attempt + 1}/{MAX_RETRIES} ---")
             
-            # Extraer requestNumber de la data
-            data = response_data.get('data', {})
-            request_number = data.get('requestNumber', '')
+            resp = requests.get(URL, headers=headers, timeout=30)  # Mayor timeout para generación
             
-            logger.info(f"  - Request Number: {request_number}")
-            logger.info(f"  - Data keys: {list(data.keys()) if isinstance(data, dict) else 'No dict'}")
+            logger.info(f" Respuesta recibida:")
+            logger.info(f"  - Status Code: {resp.status_code}")
+            logger.info(f"  - Content-Type: {resp.headers.get('Content-Type', 'N/A')}")
+            logger.info(f"  - Content-Length: {len(resp.content)} bytes")
             
-            return {
-                "success": True,
-                "message": response_data.get('message', 'Certificado generado y enviado al correo exitosamente'),
-                "requestNumber": request_number
-            }
+            # Validar respuesta vacía
+            if not resp.content or len(resp.content) == 0:
+                logger.error(" API retornó respuesta vacía")
+                
+                if attempt == MAX_RETRIES - 1:
+                    return {
+                        "success": False,
+                        "message": "El servidor retornó una respuesta vacía después de múltiples intentos",
+                        "requestNumber": ""
+                    }
+                
+                backoff_time = calculate_backoff(attempt)
+                logger.warning(f" Respuesta vacía. Reintentando en {backoff_time}s...")
+                time.sleep(backoff_time)
+                continue
+            
+            # Validar Content-Type
+            content_type = resp.headers.get('Content-Type', '')
+            if 'application/json' not in content_type.lower():
+                logger.warning(f" Content-Type no es JSON: {content_type}")
+            
+            # Parsear JSON
+            try:
+                response_data = resp.json()
+                logger.info(f" JSON parseado exitosamente")
+                logger.info(f"  - Claves: {list(response_data.keys())}")
+                logger.info(f"  - Success: {response_data.get('success', 'N/A')}")
+                logger.info(f"  - Message: {response_data.get('message', 'N/A')}")
+            except ValueError as ve:
+                logger.error(f" Respuesta no es JSON válido")
+                logger.error(f"  - Error: {str(ve)}")
+                logger.error(f"  - Respuesta (primeros 300 chars): {resp.text[:300]}")
+                
+                if attempt == MAX_RETRIES - 1:
+                    return {
+                        "success": False,
+                        "message": "Respuesta inválida del servidor después de múltiples intentos",
+                        "requestNumber": ""
+                    }
+                
+                backoff_time = calculate_backoff(attempt)
+                logger.warning(f" Error parseando JSON. Reintentando en {backoff_time}s...")
+                time.sleep(backoff_time)
+                continue
+            
+            # Si llegamos aquí, la petición fue exitosa
+            logger.info(f" Llamada al API completada exitosamente en intento {attempt + 1}")
+            
+            # Procesar respuesta según status code
+            if resp.status_code == 200:
+                logger.info(" Status 200 - Certificado generado exitosamente")
+                
+                # Extraer requestNumber de la data
+                data = response_data.get('data', {})
+                request_number = data.get('requestNumber', '')
+                
+                logger.info(f"  - Request Number: {request_number}")
+                logger.info(f"  - Data keys: {list(data.keys()) if isinstance(data, dict) else 'No dict'}")
+                
+                return {
+                    "success": True,
+                    "message": response_data.get('message', 'Certificado generado y enviado al correo exitosamente'),
+                    "requestNumber": request_number
+                }
+            else:
+                logger.error(f" Status {resp.status_code} - Error inesperado")
+                return {
+                    "success": False,
+                    "message": response_data.get('message', 'Error al generar el certificado'),
+                    "requestNumber": ""
+                }
         
-        elif resp.status_code == 404:
-            logger.warning("⚠️ Status 404 - CHIP no encontrado")
+        except requests.exceptions.Timeout as e:
+            last_exception = e
+            logger.error(f" Timeout en intento {attempt + 1}/{MAX_RETRIES} (30 segundos)")
+            
+            if attempt == MAX_RETRIES - 1:
+                logger.error(f" Timeout después de {MAX_RETRIES} intentos")
+                return {
+                    "success": False,
+                    "message": "Tiempo de espera agotado al generar el certificado",
+                    "requestNumber": ""
+                }
+            
+            backoff_time = calculate_backoff(attempt)
+            logger.warning(f" Esperando {backoff_time}s antes de reintentar...")
+            time.sleep(backoff_time)
+        
+        except requests.exceptions.ConnectionError as e:
+            last_exception = e
+            logger.error(f" Error de conexión en intento {attempt + 1}/{MAX_RETRIES}: {str(e)}")
+            
+            if attempt == MAX_RETRIES - 1:
+                logger.error(f" Error de conexión después de {MAX_RETRIES} intentos")
+                return {
+                    "success": False,
+                    "message": "No se pudo conectar con el servidor",
+                    "requestNumber": ""
+                }
+            
+            backoff_time = calculate_backoff(attempt)
+            logger.warning(f" Esperando {backoff_time}s antes de reintentar...")
+            time.sleep(backoff_time)
+        
+        except requests.exceptions.RequestException as e:
+            last_exception = e
+            logger.error(f" Error en la solicitud HTTP en intento {attempt + 1}/{MAX_RETRIES}: {str(e)}")
+            
+            if attempt == MAX_RETRIES - 1:
+                logger.error(f" Error en solicitud HTTP después de {MAX_RETRIES} intentos")
+                return {
+                    "success": False,
+                    "message": "Error en la solicitud HTTP al generar el certificado",
+                    "requestNumber": ""
+                }
+            
+            backoff_time = calculate_backoff(attempt)
+            logger.warning(f" Esperando {backoff_time}s antes de reintentar...")
+            time.sleep(backoff_time)
+        
+        except Exception as e:
+            logger.exception(f" Error inesperado en generación de certificado: {str(e)}")
             return {
                 "success": False,
-                "message": response_data.get('message', 'No se encontró predio con el CHIP especificado'),
+                "message": "Error inesperado al generar el certificado",
                 "requestNumber": ""
             }
-        
-        elif resp.status_code == 401:
-            logger.error("❌ Status 401 - Token inválido")
-            return {
-                "success": False,
-                "message": "Token de autenticación inválido o expirado",
-                "requestNumber": ""
-            }
-        
-        elif resp.status_code == 400:
-            logger.error("❌ Status 400 - Solicitud inválida")
-            return {
-                "success": False,
-                "message": response_data.get('message', 'Error en la solicitud del certificado'),
-                "requestNumber": ""
-            }
-        
-        else:
-            logger.error(f"❌ Status {resp.status_code} - Error inesperado")
-            return {
-                "success": False,
-                "message": response_data.get('message', 'Error al generar el certificado'),
-                "requestNumber": ""
-            }
-        
-    except requests.exceptions.Timeout:
-        logger.error("❌ Timeout en generación de certificado")
-        raise
-    except requests.exceptions.RequestException as e:
-        logger.error(f"❌ Error de red en generación de certificado: {str(e)}")
-        raise
+    
+    # Si llegamos aquí, algo salió mal en todos los intentos
+    logger.error(f" Falló después de {MAX_RETRIES} intentos")
+    return {
+        "success": False,
+        "message": f"Error después de {MAX_RETRIES} intentos: {str(last_exception)}",
+        "requestNumber": ""
+    }
 
 
 def guardar_auditoria(documento, tipo_documento, nombre_completo, chip, request_number):
@@ -529,8 +626,8 @@ def guardar_auditoria(documento, tipo_documento, nombre_completo, chip, request_
     Tabla: cat-test-certification-data
     
     Campos:
-    - id (PK): UUID único
-    - nombreCompleto: Nombre completo del ciudadano
+    - id (PK): ID único
+    - nombre: Nombre completo del ciudadano
     - tipoDocumento: Tipo de documento (CC, CE, etc.)
     - numeroIdentificacion: Número de documento
     - fechaHora: Timestamp de la solicitud (ISO 8601)
@@ -544,7 +641,7 @@ def guardar_auditoria(documento, tipo_documento, nombre_completo, chip, request_
         chip: CHIP del predio
         request_number: Número de radicado de la certificación
     """
-    logger.info(f"💾 Guardando auditoría en DynamoDB...")
+    logger.info(f" Guardando auditoría en DynamoDB...")
     logger.info(f"  - Tabla: {TABLE_AUDITORIA}")
     
     try:
@@ -577,7 +674,7 @@ def guardar_auditoria(documento, tipo_documento, nombre_completo, chip, request_
         # Guardar en DynamoDB
         table.put_item(Item=item)
         
-        logger.info(f"✅ Auditoría guardada exitosamente")
+        logger.info(f" Auditoría guardada exitosamente")
         logger.info(f"  - ID de auditoría: {audit_id}")
         
         return True
@@ -585,11 +682,11 @@ def guardar_auditoria(documento, tipo_documento, nombre_completo, chip, request_
     except ClientError as e:
         error_code = e.response['Error']['Code']
         error_message = e.response['Error']['Message']
-        logger.error(f"❌ Error al guardar auditoría en DynamoDB: {error_code}")
+        logger.error(f" Error al guardar auditoría en DynamoDB: {error_code}")
         logger.error(f"  - Mensaje: {error_message}")
         return False
     except Exception as e:
-        logger.error(f"❌ Error inesperado guardando auditoría")
+        logger.error(f" Error inesperado guardando auditoría")
         logger.error(f"  - Tipo: {type(e).__name__}")
         logger.error(f"  - Mensaje: {str(e)}")
         logger.exception("Stack trace completo:")
@@ -628,5 +725,5 @@ def build_response(event, response_data, status_code=200):
         }
     }
     
-    logger.info("✅ Respuesta formateada correctamente")
+    logger.info(" Respuesta formateada correctamente")
     return formatted_response
