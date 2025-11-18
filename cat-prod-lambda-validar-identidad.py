@@ -75,7 +75,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         api_response = call_identity_validation_api(tipo_documento, documento)
         
         # Process API response
-        if api_response['status_code'] == 200 and api_response.get('data', {}).get('success', False) == True:
+        if api_response['status_code'] == 200 and api_response.get('data', {}).get('success', False):
             logger.info("API respondió exitosamente con status 200")
             response_data = api_response['data']
             logger.info(f"Datos de respuesta del API: {json.dumps(response_data)}")
