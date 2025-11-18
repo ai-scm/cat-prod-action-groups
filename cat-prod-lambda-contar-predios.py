@@ -336,7 +336,7 @@ def call_contar_predios_api(token):
     payload = {}
     
     logger.info(f"=== Llamando API de Conteo de Predios (con exponential backoff) ===")
-    logger.info(f"Endpoint: POST {URL}")
+    logger.info(f"Endpoint: GET {URL}")
     logger.info(f"Headers: {dict((k, v[:20] + '...' if k == 'Authorization' else v) for k, v in headers.items())}")
     logger.info(f"Payload: {json.dumps(payload)}")
     logger.info(f"Max reintentos: {MAX_RETRIES}, Backoff inicial: {INITIAL_BACKOFF}s")
@@ -348,7 +348,7 @@ def call_contar_predios_api(token):
             logger.info(f"--- Intento {attempt + 1}/{MAX_RETRIES} ---")
             
             # Timeout de 15 segundos
-            resp = requests.post(URL, json=payload, headers=headers, timeout=15)
+            resp = requests.get(URL, json=payload, headers=headers, timeout=15)
             
             logger.info(f"Respuesta recibida - Status Code: {resp.status_code}")
             logger.info(f"Response headers: {dict(resp.headers)}")
@@ -541,7 +541,8 @@ def validate_token(documento):
 
             data = response_data.get('data', {})
             is_valid = data.get('valid', False)
-            time_to_expire = data.get('timeToExpire', 0)  # Tiempo en segundos para expirar
+            token_info = data.get('tokenInfo', {})
+            time_to_expire = token_info.get('timeToExpire', 0)  # Tiempo en segundos para expirar
             logger.info(f"Token válido: {is_valid}, Tiempo para expirar: {time_to_expire}ms")
             
             if is_valid and time_to_expire > 2000:
@@ -636,12 +637,14 @@ def refresh_token_for_document(token_dict):
             'error_code': str (opcional)
         }
     """
-    logger.info(f"=== Iniciando refresh de token para documento: {documento[:3]}*** ===")
     
     # 1. Obtener refresh token desde DynamoDB
     logger.info("Paso 1: Obteniendo refresh token desde DynamoDB")
     #refresh_token = get_refresh_token_from_dynamodb(documento)
     documento = token_dict.get('documento', '') if token_dict else ''
+
+    logger.info(f"=== Iniciando refresh de token para documento: {documento[:3]}*** ===")
+
     refresh_token = token_dict.get('refreshToken', '') if token_dict else ''
     
     if not refresh_token:
