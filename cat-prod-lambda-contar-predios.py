@@ -280,7 +280,7 @@ def get_token_from_dynamodb(documento):
         documento: Numero de documento del usuario
     
     Returns:
-        dict: Token info o None si no se encuentra
+        dict: Item de DynamoDB con el token o None si no se encuentra
     """
     if not documento:
         logger.warning("Documento vacío, no se puede recuperar token")
@@ -497,7 +497,7 @@ def validate_token(documento):
             'message': str
         }
     """
-    VALIDATE_TOKEN_URL = f"{API_BASE_URL}/validate-token"
+    VALIDATE_TOKEN_URL = f"{API_BASE_URL}/auth/validate-token"
 
 
     token_dict = get_token_from_dynamodb(documento)
@@ -540,7 +540,7 @@ def validate_token(documento):
                 continue
 
             data = response_data.get('data', {})
-            is_valid = data.get('isValid', False)
+            is_valid = data.get('valid', False)
             time_to_expire = data.get('timeToExpire', 0)  # Tiempo en segundos para expirar
             logger.info(f"Token válido: {is_valid}, Tiempo para expirar: {time_to_expire}ms")
             
@@ -569,7 +569,6 @@ def validate_token(documento):
                         'success': False,
                         'message': refresh_token_response.get('message', 'Error al refrescar el token')
                     }
-
 
         except requests.exceptions.RequestException as e:
             logger.error(f"Error validando token en intento {attempt + 1}/{MAX_RETRIES}: {str(e)}")
