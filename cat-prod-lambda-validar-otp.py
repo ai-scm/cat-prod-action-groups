@@ -120,6 +120,7 @@ def handler(event, context):
             token_saved = save_token_to_dynamodb(
                 session_id=session_id,
                 token=api_response.get('token'),
+                refresh_token=api_response.get('refreshToken', ''),
                 documento=documento,
                 tipo_documento=tipo_documento,
                 usuario=api_response.get('usuario', {})
@@ -450,7 +451,7 @@ def extract_intentos_from_message(message):
     return None
 
 
-def save_token_to_dynamodb(session_id, token, documento, tipo_documento, usuario):
+def save_token_to_dynamodb(session_id, token,refresh_token, documento, tipo_documento, usuario):
     """
     Guarda el token JWT en DynamoDB con TTL de 10 minutos
     
@@ -486,6 +487,7 @@ def save_token_to_dynamodb(session_id, token, documento, tipo_documento, usuario
             'documento': documento,           # PK - Primary Key
             'sessionId': session_id,          # Metadata de Bedrock Agent
             'token': token,
+            'refreshToken': refresh_token, 
             'tipoDocumento': tipo_documento,
             'tokenType': 'Bearer',
             'createdAt': int(time.time()),
@@ -507,6 +509,7 @@ def save_token_to_dynamodb(session_id, token, documento, tipo_documento, usuario
         logger.info(f"  - SessionId: {session_id}")
         logger.info(f"  - TTL: {ttl_timestamp} ({600} segundos = 10 minutos)")
         logger.info(f"  - Documento: {tipo_documento}-{documento[:3]}***")
+        logger.info(f"  - refreshToken (primeros 10 chars): {refresh_token[:10]}...")
         logger.info(f"  - Usuario: {usuario.get('nombre', 'N/A')} {usuario.get('apellido', 'N/A')}")
         return True
         
