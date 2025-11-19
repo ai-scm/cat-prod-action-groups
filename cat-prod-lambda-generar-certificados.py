@@ -240,13 +240,13 @@ def handler(event, context):
             else:
                 fallidos += 1
                 logger.error(f" Error generando certificado para CHIP: {chip}")
-                logger.error(f"  - Error: {resultado.get('mensaje', 'Error desconocido')}")
+                logger.error(f"  - Error: {resultado.get('message', 'Error desconocido')}")
             
             resultados.append({
                 "chip": chip,
                 "success": resultado.get('success'),
                 "requestNumber": resultado.get('requestNumber', ''),
-                "message": resultado.get('mensaje', '')
+                "message": resultado.get('message', '')
             })
         
         # 4. Construir respuesta final
