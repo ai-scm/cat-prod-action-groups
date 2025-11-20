@@ -6,6 +6,8 @@ import json
 import logging
 import time
 import re
+import os
+import random
 import requests
 import boto3
 from botocore.exceptions import ClientError
@@ -21,6 +23,99 @@ TABLE_NAME = 'cat-test-certification-session-tokens'
 MAX_RETRIES = 10
 INITIAL_BACKOFF = 1  # segundos
 MAX_BACKOFF = 60  # segundos
+
+# ============================================================
+# CONFIGURACIÓN DE MODO MOCK
+# ============================================================
+ENABLE_MOCK = os.environ.get('ENABLE_MOCK', 'false').lower() == 'true'
+
+# Usuarios mock para testing (2 usuarios que YA pasaron ValidarIdentidad)
+MOCK_USERS = {
+    "123456789": {
+        "tipoDocumento": "CC",
+        "nombre": "Juan Carlos",
+        "apellido": "Rodríguez",
+        "email": "juan.rodriguez@catastro.test",
+        "numeroDocumento": "123456789"
+    },
+    "987654321": {
+        "tipoDocumento": "CC",
+        "nombre": "María Elena",
+        "apellido": "González",
+        "email": "maria.gonzalez@catastro.test",
+        "numeroDocumento": "987654321"
+    }
+}
+
+logger.info(f"[MOCK CONFIG] ENABLE_MOCK = {ENABLE_MOCK}")
+if ENABLE_MOCK:
+    logger.info(f"[MOCK CONFIG] Usuarios mock configurados: {list(MOCK_USERS.keys())}")
+
+
+def get_mock_otp_response(documento, codigo, tipo_documento):
+    """
+    Genera una respuesta simulada para validación de OTP
+    ACEPTA CUALQUIER código de 4 dígitos como válido
+    
+    Args:
+        documento: Número de documento del usuario
+        codigo: Código OTP (cualquier 4 dígitos)
+        tipo_documento: Tipo de documento (CC, CE, etc.)
+    
+    Returns:
+        dict: Respuesta simulada del API con token JWT mock
+    """
+    logger.info("[MOCK] 🎭 Generando respuesta mock para ValidarOTP")
+    logger.info(f"[MOCK] Documento: {tipo_documento}-{documento[:3]}***")
+    logger.info(f"[MOCK] Código: {codigo[:2]}****")
+    
+    # Simular delay realista del API (0.5s - 2s)
+    delay = random.uniform(0.5, 2.0)
+    logger.info(f"[MOCK] Simulando delay de {delay:.2f} segundos...")
+    time.sleep(delay)
+    
+    # Validar formato del código (debe ser 4 dígitos)
+    if not codigo or len(codigo) != 4 or not codigo.isdigit():
+        logger.warning(f"[MOCK] ⚠️ Código inválido (debe ser 4 dígitos): {codigo}")
+        return {
+            "success": False,
+            "intentosRestantes": 2,
+            "message": "❌ Código incorrecto. Te quedan 2 intento(s)"
+        }
+    
+    # Generar token JWT mock (formato realista)
+    timestamp = int(time.time())
+    token_mock = f"MOCK_JWT_TOKEN_{documento}_{timestamp}_{random.randint(1000, 9999)}"
+    refresh_token_mock = f"MOCK_REFRESH_TOKEN_{documento}_{timestamp}_{random.randint(5000, 9999)}"
+    
+    # Obtener datos del usuario si existe en MOCK_USERS
+    if documento in MOCK_USERS:
+        user_data = MOCK_USERS[documento]
+        logger.info(f"[MOCK] ✅ Usuario encontrado en MOCK_USERS: {user_data['nombre']} {user_data['apellido']}")
+    else:
+        # Usuario genérico
+        logger.info(f"[MOCK] ⚠️ Usuario NO encontrado en MOCK_USERS, usando datos genéricos")
+        user_data = {
+            "tipoDocumento": tipo_documento,
+            "nombre": "Usuario Mock",
+            "apellido": "Genérico",
+            "email": f"mock{documento[:3]}***@catastro.test",
+            "numeroDocumento": documento
+        }
+    
+    logger.info(f"[MOCK] ✅ OTP ACEPTADO - Generando token mock")
+    logger.info(f"[MOCK] Token generado (longitud): {len(token_mock)} caracteres")
+    
+    return {
+        "success": True,
+        "intentosRestantes": 3,
+        "message": "✅ Código OTP válido (MOCK)",
+        "token": token_mock,
+        "refreshToken": refresh_token_mock,
+        "tokenType": "Bearer",
+        "expiresIn": 600,  # 10 minutos
+        "usuario": user_data
+    }
 
 
 def calculate_backoff(attempt):
@@ -57,6 +152,8 @@ def handler(event, context):
     }
     """
     logger.info("=== Lambda: Validar OTP ===")
+    if ENABLE_MOCK:
+        logger.info("[MOCK] 🎭 MODO MOCK HABILITADO")
     logger.info(f"Event: {json.dumps(event)}")
     
     # Extraer datos del evento - Bedrock Agent envía en requestBody
@@ -108,8 +205,14 @@ def handler(event, context):
     logger.debug(f"Código OTP (debug): {codigo[:2]}****")
     
     try:
-        # Llamar a la API de validación OTP
-        api_response = call_validar_otp(documento, codigo, tipo_documento)
+        # DECISIÓN: ¿Usar MOCK o API real?
+        if ENABLE_MOCK:
+            logger.info("[MOCK] 🎭 Usando validación MOCK (API externa NO será llamada)")
+            logger.info("[MOCK] ACEPTA CUALQUIER código de 4 dígitos")
+            api_response = get_mock_otp_response(documento, codigo, tipo_documento)
+        else:
+            logger.info("📡 Llamando API externa REAL")
+            api_response = call_validar_otp(documento, codigo, tipo_documento)
         
         # Procesar respuesta
         if api_response.get('success'):

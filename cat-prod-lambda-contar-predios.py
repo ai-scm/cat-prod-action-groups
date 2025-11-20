@@ -8,6 +8,7 @@ import time
 import requests
 import boto3
 import os
+import random
 from botocore.exceptions import ClientError
 
 logger = logging.getLogger()
@@ -24,6 +25,98 @@ API_BASE_URL = os.environ.get('API_BASE_URL', 'http://vmprocondock.catastrobogot
 MAX_RETRIES = 10
 INITIAL_BACKOFF = 1  # segundos
 MAX_BACKOFF = 60  # segundos
+
+# ============================================================
+# CONFIGURACIÓN DE MODO MOCK
+# ============================================================
+ENABLE_MOCK = os.environ.get('ENABLE_MOCK', 'false').lower() == 'true'
+
+# Usuarios mock para testing (2 usuarios configurables)
+MOCK_USERS = {
+    "123456789": {
+        "nombre": "Juan Carlos",
+        "apellido": "Rodríguez",
+        "email": "juan.rodriguez@catastro.test",
+        "prediosCount": int(os.environ.get('MOCK_PREDIOS_COUNT', '3'))  # Configurable por env var
+    },
+    "987654321": {
+        "nombre": "María Elena",
+        "apellido": "González",
+        "email": "maria.gonzalez@catastro.test",
+        "prediosCount": int(os.environ.get('MOCK_PREDIOS_COUNT', '15'))  # Usuario con muchos predios
+    }
+}
+
+logger.info(f"[MOCK CONFIG] ENABLE_MOCK = {ENABLE_MOCK}")
+if ENABLE_MOCK:
+    logger.info(f"[MOCK CONFIG] Usuarios mock configurados: {list(MOCK_USERS.keys())}")
+    logger.info(f"[MOCK CONFIG] MOCK_PREDIOS_COUNT = {os.environ.get('MOCK_PREDIOS_COUNT', '3 (default)')}")
+
+def get_mock_response(documento):
+    """
+    Genera una respuesta simulada para testing sin llamar al API externo
+    Simula delay realista y retorna conteo de predios configurable
+    
+    Args:
+        documento: Número de documento del usuario
+    
+    Returns:
+        dict: Respuesta simulada del API con conteo de predios
+    """
+    logger.info("[MOCK] 🎭 Generando respuesta mock para ContarPredios")
+    logger.info(f"[MOCK] Documento: {documento[:3]}***")
+    
+    # Simular delay realista del API (0.5s - 2s)
+    delay = random.uniform(0.5, 2.0)
+    logger.info(f"[MOCK] Simulando delay de {delay:.2f} segundos...")
+    time.sleep(delay)
+    
+    # Verificar si el usuario existe en MOCK_USERS
+    if documento in MOCK_USERS:
+        user_data = MOCK_USERS[documento]
+        predios_count = user_data["prediosCount"]
+        
+        logger.info(f"[MOCK] ✅ Usuario encontrado en MOCK_USERS")
+        logger.info(f"[MOCK] Nombre: {user_data['nombre']} {user_data['apellido']}")
+        logger.info(f"[MOCK] Predios configurados: {predios_count}")
+        
+        return {
+            'status_code': 200,
+            'data': {
+                "success": True,
+                "message": f"Predios consultados exitosamente (MOCK)",
+                "data": {
+                    "cantidadPredios": predios_count,
+                    "documento": documento,
+                    "nombreUsuario": f"{user_data['nombre']} {user_data['apellido']}",
+                    "mockMode": True
+                },
+                "errorCode": ""
+            }
+        }
+    else:
+        # Usuario no existe en MOCK - Retornar default de 3 predios
+        default_count = int(os.environ.get('MOCK_PREDIOS_COUNT', '3'))
+        
+        logger.info(f"[MOCK] ⚠️ Usuario NO encontrado en MOCK_USERS")
+        logger.info(f"[MOCK] Usando conteo default: {default_count} predios")
+        
+        return {
+            'status_code': 200,
+            'data': {
+                "success": True,
+                "message": f"Predios consultados exitosamente (MOCK - usuario genérico)",
+                "data": {
+                    "cantidadPredios": default_count,
+                    "documento": documento,
+                    "nombreUsuario": "Usuario Mock Genérico",
+                    "mockMode": True,
+                    "advertencia": "Este usuario no está en MOCK_USERS, usando conteo default"
+                },
+                "errorCode": ""
+            }
+        }
+
 
 def lambda_handler(event, context):
     """
@@ -46,6 +139,8 @@ def lambda_handler(event, context):
     }
     """
     logger.info("=== Lambda: Contar Predios ===")
+    if ENABLE_MOCK:
+        logger.info("[MOCK] 🎭 MODO MOCK HABILITADO")
     logger.info(f"Event: {json.dumps(event)}")
     
     try:
@@ -84,49 +179,62 @@ def lambda_handler(event, context):
         logger.info("Parámetros validados correctamente")
         logger.info(f"Contando predios para documento: {documento[:3]}***")
         
-        # Validar token 
-        logger.info("Validando token")
-
-        validate_token_response = validate_token(documento)
-        if not validate_token_response['success']:
-            logger.error(f"Token inválido: {validate_token_response.get('message')}")
-            return format_bedrock_response(
-                event=event,
-                status_code=401,
-                body={
-                    "success": False,
-                    "message": "Tu sesión ha expirado. Por favor, valida tu identidad nuevamente",
-                    "data": {},
-                    "errorCode": "TOKEN_EXPIRED"
-                }
-            )
-        
-        logger.info("Token validado exitosamente")
-        
-        # Obtener token de DynamoDB
-        logger.info("Iniciando recuperación de token desde DynamoDB")
-        token_dict= get_token_from_dynamodb(documento)
-        token = token_dict.get('token', '') if token_dict else ''
-        
-        if not token:
-            logger.error("Token no encontrado en DynamoDB")
-            return format_bedrock_response(
-                event=event,
-                status_code=401,
-                body={
-                    "success": False,
-                    "message": "Sesión no autenticada. Por favor, valida tu identidad primero",
-                    "data": {},
-                    "errorCode": "TOKEN_NOT_FOUND"
-                }
-            )
-        
-        logger.info("Token recuperado de DynamoDB")
-
-        
-        # Llamar a la API de conteo de predios
-        logger.info("Iniciando llamada al API externo")
-        api_response = call_contar_predios_api(token)
+        # ============================================================
+        # DECISIÓN: ¿Usar MOCK o API real?
+        # ============================================================
+        if ENABLE_MOCK:
+            # MODO MOCK: Saltar validación de token y llamada al API externo
+            logger.info("[MOCK] 🎭 MODO MOCK ACTIVADO - Saltando validación de token")
+            logger.info("[MOCK] No se validará token ni se recuperará de DynamoDB")
+            logger.info("[MOCK] Generando respuesta simulada directamente...")
+            
+            api_response = get_mock_response(documento)
+            
+        else:
+            # MODO REAL: Validar token y llamar al API externo
+            logger.info("📡 MODO REAL - Validando token y llamando API externo")
+            
+            # Validar token 
+            logger.info("Validando token")
+            validate_token_response = validate_token(documento)
+            if not validate_token_response['success']:
+                logger.error(f"Token inválido: {validate_token_response.get('message')}")
+                return format_bedrock_response(
+                    event=event,
+                    status_code=401,
+                    body={
+                        "success": False,
+                        "message": "Tu sesión ha expirado. Por favor, valida tu identidad nuevamente",
+                        "data": {},
+                        "errorCode": "TOKEN_EXPIRED"
+                    }
+                )
+            
+            logger.info("Token validado exitosamente")
+            
+            # Obtener token de DynamoDB
+            logger.info("Iniciando recuperación de token desde DynamoDB")
+            token_dict = get_token_from_dynamodb(documento)
+            token = token_dict.get('token', '') if token_dict else ''
+            
+            if not token:
+                logger.error("Token no encontrado en DynamoDB")
+                return format_bedrock_response(
+                    event=event,
+                    status_code=401,
+                    body={
+                        "success": False,
+                        "message": "Sesión no autenticada. Por favor, valida tu identidad primero",
+                        "data": {},
+                        "errorCode": "TOKEN_NOT_FOUND"
+                    }
+                )
+            
+            logger.info("Token recuperado de DynamoDB")
+            
+            # Llamar al API externo REAL
+            logger.info("📡 Llamando API externa REAL")
+            api_response = call_contar_predios_api(token)
         
         # Procesar respuesta
 

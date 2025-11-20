@@ -8,6 +8,8 @@ import logging
 import requests
 import boto3
 import time
+import os
+import random
 from botocore.exceptions import ClientError
 from urllib.parse import quote
 
@@ -26,6 +28,31 @@ MAX_RETRIES = 10
 INITIAL_BACKOFF = 1  # segundos
 MAX_BACKOFF = 60  # segundos
 
+# ============================================================
+# CONFIGURACIÓN DE MODO MOCK
+# ============================================================
+ENABLE_MOCK = os.environ.get('ENABLE_MOCK', 'false').lower() == 'true'
+
+# Usuarios mock para testing (2 usuarios con predios simulados)
+MOCK_USERS = {
+    "123456789": {
+        "nombre": "Juan Carlos",
+        "apellido": "Rodríguez",
+        "email": "juan.rodriguez@catastro.test",
+        "predios": 3  # Tiene 3 predios (no necesita BuscarPredios)
+    },
+    "987654321": {
+        "nombre": "María Elena",
+        "apellido": "González",
+        "email": "maria.gonzalez@catastro.test",
+        "predios": 15  # Tiene 15 predios (SÍ necesita BuscarPredios)
+    }
+}
+
+logger.info(f"[MOCK CONFIG] ENABLE_MOCK = {ENABLE_MOCK}")
+if ENABLE_MOCK:
+    logger.info(f"[MOCK CONFIG] Usuarios mock configurados: {list(MOCK_USERS.keys())}")
+
 # Mapeo de zonas a códigos de círculo registral
 # Nota: este mapeo es el prefijo que siempre va antes del numero de la matrícula por ejemplo "050C00012345"
 ZONA_TO_CIRCULO = {
@@ -33,6 +60,87 @@ ZONA_TO_CIRCULO = {
     "CENTRO": "050C",
     "SUR": "050S"
 }
+
+
+def get_mock_predio_data(metodo, valor, zona=None):
+    """
+    Genera datos mock de un predio basado en el método de búsqueda
+    Simula delay realista y estructura de respuesta del API
+    
+    Args:
+        metodo: "CHIP", "DIRECCION", o "MATRICULA"
+        valor: Valor de búsqueda (CHIP, dirección, matrícula)
+        zona: Zona para matrícula ("NORTE", "CENTRO", "SUR")
+    
+    Returns:
+        dict: Respuesta simulada del API con datos del predio
+    """
+    logger.info(f"[MOCK] 🎭 Generando predio mock para búsqueda por {metodo}")
+    logger.info(f"[MOCK] Valor: {valor[:20]}...")
+    
+    # Simular delay realista del API (0.5s - 2s)
+    delay = random.uniform(0.5, 2.0)
+    logger.info(f"[MOCK] Simulando delay de {delay:.2f} segundos...")
+    time.sleep(delay)
+    
+    # Generar CHIP consistente basado en el valor de búsqueda
+    # Usar hash para que el mismo valor siempre genere el mismo CHIP
+    chip_hash = str(abs(hash(valor)))[:12].zfill(12)
+    chip_mock = f"AAA{chip_hash[:3]}{chip_hash[3:7]}{chip_hash[7:11]}{chip_hash[11:12]}"
+    
+    # Generar dirección mock
+    calles = ["CALLE", "CARRERA", "DIAGONAL", "TRANSVERSAL", "AVENIDA"]
+    calle = random.choice(calles)
+    numero = random.randint(1, 200)
+    num2 = random.randint(1, 99)
+    num3 = random.randint(1, 99)
+    direccion_mock = f"{calle} {numero} # {num2}-{num3}"
+    
+    # Si es búsqueda por dirección, usar el valor ingresado
+    if metodo == "DIRECCION":
+        direccion_mock = valor
+    
+    # Generar matrícula mock
+    if zona:
+        prefijo = ZONA_TO_CIRCULO.get(zona.upper(), "050C")
+    else:
+        prefijo = random.choice(["050N", "050C", "050S"])
+    
+    matricula_num = str(random.randint(10000, 99999))
+    matricula_mock = f"{prefijo}{matricula_num}"
+    
+    # Si es búsqueda por matrícula, usar el valor ingresado con prefijo
+    if metodo == "MATRICULA":
+        matricula_mock = f"{prefijo}{valor.replace('-', '').replace(prefijo, '')}"
+    
+    # Construir respuesta completa del predio
+    predio_data = {
+        "chip": chip_mock if metodo == "CHIP" else valor if metodo == "CHIP" else chip_mock,
+        "direccion": direccion_mock,
+        "direccionReal": direccion_mock,
+        "matricula": matricula_mock,
+        "numeroMatricula": matricula_mock,
+        "tipo": random.choice(["Urbano", "Rural"]),
+        "avaluo": random.randint(50000000, 500000000),
+        "area": round(random.uniform(50.0, 500.0), 2),
+        "estrato": random.randint(1, 6),
+        "uso": random.choice(["Residencial", "Comercial", "Mixto"]),
+        "mockMode": True,
+        "metodoBusqueda": metodo
+    }
+    
+    logger.info(f"[MOCK] ✅ Predio mock generado:")
+    logger.info(f"[MOCK]   - CHIP: {predio_data['chip']}")
+    logger.info(f"[MOCK]   - Dirección: {predio_data['direccion']}")
+    logger.info(f"[MOCK]   - Matrícula: {predio_data['matricula']}")
+    logger.info(f"[MOCK]   - Avalúo: ${predio_data['avaluo']:,}")
+    
+    return {
+        "success": True,
+        "message": f"Predio encontrado por {metodo} (MOCK)",
+        "data": predio_data,
+        "errorCode": ""
+    }
 
 
 def calculate_backoff(attempt):
@@ -80,6 +188,8 @@ def handler(event, context):
     }
     """
     logger.info("=== Lambda: Buscar Predios ===")
+    if ENABLE_MOCK:
+        logger.info("[MOCK] 🎭 MODO MOCK HABILITADO")
     logger.info(f" Event recibido: {json.dumps(event, ensure_ascii=False)}")
     
     # Extraer parámetros - Bedrock Agent envía en requestBody
@@ -172,51 +282,64 @@ def handler(event, context):
     logger.info(f" Buscando predio por {metodo}: {valor[:20]}...")
     
     try:
-        
-        # Validar token 
-        logger.info("Validando token")
+        # ============================================================
+        # DECISIÓN: ¿Usar MOCK o API real?
+        # ============================================================
+        if ENABLE_MOCK:
+            # MODO MOCK: Saltar validación de token y llamada al API externo
+            logger.info("[MOCK] 🎭 MODO MOCK ACTIVADO - Saltando validación de token")
+            logger.info("[MOCK] No se validará token ni se recuperará de DynamoDB")
+            logger.info(f"[MOCK] Generando respuesta simulada para {metodo}...")
+            
+            api_response = get_mock_predio_data(metodo, valor, zona)
+            
+        else:
+            # MODO REAL: Validar token y llamar al API externo
+            logger.info("📡 MODO REAL - Validando token y llamando API externo")
+            
+            # Validar token 
+            logger.info("Validando token")
+            validate_token_response = validate_token(documento)
+            if not validate_token_response['success']:
+                logger.error(f"Token inválido: {validate_token_response.get('message')}")
+                return format_bedrock_response(
+                    event=event,
+                    status_code=401,
+                    body={
+                        "success": False,
+                        "message": "Tu sesión ha expirado. Por favor, valida tu identidad nuevamente",
+                        "data": {},
+                        "errorCode": "TOKEN_EXPIRED"
+                    }
+                )
+            
+            logger.info("Token validado exitosamente")
 
-        validate_token_response = validate_token(documento)
-        if not validate_token_response['success']:
-            logger.error(f"Token inválido: {validate_token_response.get('message')}")
-            return format_bedrock_response(
-                event=event,
-                status_code=401,
-                body={
+            # Obtener token JWT de DynamoDB
+            logger.info(" PASO 1: Recuperando token JWT de DynamoDB...")
+            token_dict = get_token_from_dynamodb(documento)
+            token = token_dict.get('token', '') if token_dict else ''
+            
+            if not token:
+                logger.error(" Token no encontrado en DynamoDB")
+                logger.error("  - Posibles causas:")
+                logger.error("    1. Token expiró (TTL de 10 minutos)")
+                logger.error("    2. Documento incorrecto")
+                logger.error("    3. Usuario no completó validación OTP")
+                return build_response(event, {
                     "success": False,
-                    "message": "Tu sesión ha expirado. Por favor, valida tu identidad nuevamente",
-                    "data": {},
-                    "errorCode": "TOKEN_EXPIRED"
-                }
-            )
-        
-        logger.info("Token validado exitosamente")
-
-        # 1. Obtener token JWT de DynamoDB
-        logger.info(" PASO 1: Recuperando token JWT de DynamoDB...")
-        token_dict = get_token_from_dynamodb(documento)
-        token = token_dict.get('token', '') if token_dict else ''
-        
-        if not token:
-            logger.error(" Token no encontrado en DynamoDB")
-            logger.error("  - Posibles causas:")
-            logger.error("    1. Token expiró (TTL de 10 minutos)")
-            logger.error("    2. Documento incorrecto")
-            logger.error("    3. Usuario no completó validación OTP")
-            return build_response(event, {
-                "success": False,
-                "message": "Token de autenticación no encontrado o expirado. Por favor reinicia el proceso."
-            }, 200)
-        
-        # 2. Buscar predio en API según método
-        logger.info(f" PASO 2: Buscando predio por {metodo}...")
-        
-        if metodo == "CHIP":
-            api_response = buscar_por_chip(token, valor)
-        elif metodo == "DIRECCION":
-            api_response = buscar_por_direccion(token, valor)
-        elif metodo == "MATRICULA":
-            api_response = buscar_por_matricula(token, valor, zona)
+                    "message": "Token de autenticación no encontrado o expirado. Por favor reinicia el proceso."
+                }, 200)
+            
+            # Llamar al API externo REAL
+            logger.info(f" PASO 2: Buscando predio por {metodo}...")
+            logger.info("📡 Llamando API externa REAL")
+            if metodo == "CHIP":
+                api_response = buscar_por_chip(token, valor)
+            elif metodo == "DIRECCION":
+                api_response = buscar_por_direccion(token, valor)
+            elif metodo == "MATRICULA":
+                api_response = buscar_por_matricula(token, valor, zona)
         
         # 3. Procesar respuesta
         logger.info(f" PASO 3: Procesando respuesta de la API...")
