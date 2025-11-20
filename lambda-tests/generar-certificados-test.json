@@ -1,0 +1,41 @@
+{
+  "messageVersion": "1.0",
+  "sessionId": "test-session-123456",
+  "actionGroup": "GenerarCertificados",
+  "apiPath": "/generar-certificados",
+  "httpMethod": "POST",
+  "requestBody": {
+    "content": {
+      "application/json": {
+        "properties": [
+          {
+            "name": "documento",
+            "type": "string",
+            "value": "24681012"
+          },
+          {
+            "name": "tipoDocumento",
+            "type": "string",
+            "value": "CC"
+          },
+          {
+            "name": "nombreCompleto",
+            "type": "string",
+            "value": "Roger Blend"
+          },
+          {
+            "name": "direcciones",
+            "type": "array",
+            "value": "[\"KR 7 6 16 SUR IN 3 AP 301\"]"
+          }
+        ]
+      }
+    }
+  },
+  "agent": {
+    "name": "cat-test-certificaciones-agent",
+    "version": "DRAFT",
+    "id": "63ZQAGX043",
+    "alias": "TSTALIASID"
+  }
+}

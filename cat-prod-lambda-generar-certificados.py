@@ -51,24 +51,44 @@ def calculate_backoff(attempt):
 
 def handler(event, context):
     """
-    Genera certificados de tradición y libertad para los CHIPs seleccionados.
+    Genera certificados de tradición y libertad para los predios seleccionados.
+    Soporta 2 flujos diferentes según la cantidad de predios del usuario.
     
-    Input esperado (OPCIÓN 1 - Con CHIPs explícitos, para flujo ListarPredios):
+    ==================================================================================
+    FLUJO 1: ListarPredios (1-10 predios)
+    ==================================================================================
+    Input esperado:
     {
-        "documento": "1234567890",  // REQUERIDO - Para recuperar token JWT y datos de usuario
+        "documento": "1234567890",  // REQUERIDO - Para recuperar token JWT
         "tipoDocumento": "CC",  // REQUERIDO - Para auditoría
-        "chips": ["AAA1234", "BBB5678", "CCC9012"],  // OPCIONAL - Si se proporciona, se usa esto
+        "direcciones": ["KR 7 6 16 SUR IN 3 AP 301", "KR 7 6 16 SUR GJ 169"],  // REQUERIDO
         "sessionId": "xxx"  // Opcional - Metadata
     }
     
-    Input esperado (OPCIÓN 2 - Sin CHIPs, para flujo BuscarPredios):
+    Proceso:
+    1. Recibe direcciones de los predios seleccionados
+    2. Por cada dirección, llama GET /properties/address/{address} para obtener CHIP
+    3. Con los CHIPs obtenidos, genera los certificados
+    
+    NOTA: ListarPredios NO retorna CHIPs, solo direcciones. La conversión es transparente.
+    
+    ==================================================================================
+    FLUJO 2: BuscarPredios (>10 predios)
+    ==================================================================================
+    Input esperado:
     {
-        "documento": "1234567890",  // REQUERIDO - Para recuperar token JWT, CHIPs y datos de usuario de DynamoDB
+        "documento": "1234567890",  // REQUERIDO - Para recuperar token JWT y CHIPs de DynamoDB
         "tipoDocumento": "CC",  // REQUERIDO - Para auditoría
         "sessionId": "xxx"  // Opcional - Metadata
     }
-    // En este caso, los CHIPs se leen automáticamente de DynamoDB (campo chipsSeleccionados)
-    // El nombreCompleto se construye automáticamente desde usuario.nombre + usuario.apellido
+    
+    Proceso:
+    1. NO recibe direcciones ni CHIPs
+    2. Lee CHIPs desde DynamoDB (campo chipsSeleccionados)
+    3. Estos CHIPs fueron guardados previamente por BuscarPredios
+    4. Genera los certificados con los CHIPs recuperados
+    
+    ==================================================================================
     
     Output:
     {
@@ -101,36 +121,56 @@ def handler(event, context):
             documento = body.get('documento', '')
             tipo_documento = body.get('tipoDocumento', '')
             
-            # CHIPs puede venir como string separado por comas o como lista
-            chips_raw = body.get('chips', '')
-            if isinstance(chips_raw, str):
-                # Si viene como string "AAA1234,BBB5678,CCC9012"
-                chips = [chip.strip() for chip in chips_raw.split(',') if chip.strip()]
-            elif isinstance(chips_raw, list):
-                chips = chips_raw
+            # Direcciones (solo para flujo ListarPredios)
+            # Puede venir como string separado por comas, como lista, o como string JSON
+            direcciones_raw = body.get('direcciones', '')
+            if isinstance(direcciones_raw, str):
+                # Intentar parsear como JSON si tiene formato de array
+                if direcciones_raw.strip().startswith('['):
+                    try:
+                        direcciones = json.loads(direcciones_raw)
+                        if not isinstance(direcciones, list):
+                            direcciones = []
+                    except (json.JSONDecodeError, ValueError):
+                        # Si falla el JSON parse, intentar split por comas
+                        direcciones = [dir.strip() for dir in direcciones_raw.split(',') if dir.strip()]
+                else:
+                    # Si viene como string "KR 7...,KR 7..."
+                    direcciones = [dir.strip() for dir in direcciones_raw.split(',') if dir.strip()]
+            elif isinstance(direcciones_raw, list):
+                direcciones = direcciones_raw
             else:
-                chips = []
+                direcciones = []
+            
+            # Limpiar strings vacíos del array
+            direcciones = [d.strip() for d in direcciones if d and d.strip()]
             
             session_id = body.get('sessionId', event.get('sessionId', ''))
         else:
             documento = ''
             tipo_documento = ''
-            chips = []
+            direcciones = []
             session_id = event.get('sessionId', '')
     else:
         # Formato directo para testing
         documento = event.get('documento', '')
         tipo_documento = event.get('tipoDocumento', '')
-        chips = event.get('chips', [])
+        direcciones = event.get('direcciones', [])
         session_id = event.get('sessionId', '')
     
     # Log de parámetros extraídos
     logger.info(" Parámetros extraídos del evento:")
     logger.info(f"  - documento (PK): {documento[:5] if documento else '[VACÍO]'}*** (longitud: {len(documento)})")
     logger.info(f"  - tipoDocumento: {tipo_documento if tipo_documento else '[VACÍO]'}")
-    logger.info(f"  - chips: {chips}")
-    logger.info(f"  - cantidad de CHIPs: {len(chips)}")
+    logger.info(f"  - direcciones: {direcciones if direcciones else '[VACÍO - flujo BuscarPredios]'}")
+    logger.info(f"  - cantidad de direcciones: {len(direcciones)}")
     logger.info(f"  - sessionId (metadata): {session_id[:15] if session_id else '[VACÍO]'}***")
+    
+    # Determinar flujo
+    if direcciones and len(direcciones) > 0:
+        logger.info(f" Flujo detectado: LISTAR PREDIOS (1-10 predios)")
+    else:
+        logger.info(f" Flujo detectado: BUSCAR PREDIOS (>10 predios, CHIPs en DynamoDB)")
     
     # Validación de inputs
     if not documento:
@@ -147,9 +187,82 @@ def handler(event, context):
             "message": "Tipo de documento es requerido para la auditoría"
         }, 200)
     
-    # Si no se proporcionaron CHIPs como parámetro, leerlos de DynamoDB
-    if not chips or len(chips) == 0:
-        logger.info(" No se proporcionaron CHIPs en el parámetro, leyendo de DynamoDB...")
+    # FLUJOS POSIBLES:
+    # 1. FLUJO ListarPredios (1-10 predios): Vienen DIRECCIONES → convertir a CHIPs internamente
+    # 2. FLUJO BuscarPredios (>10 predios): CHIPs ya guardados en DynamoDB → leer de allí
+    # NOTA: NUNCA vienen CHIPs directamente como parámetro, solo direcciones o nada
+    
+    if direcciones and len(direcciones) > 0:
+        # ============================================================
+        # FLUJO 1: ListarPredios - Usuario tiene 1-10 predios
+        # ============================================================
+        logger.info(f"🏘️ FLUJO LISTAR PREDIOS")
+        logger.info(f"📍 Direcciones proporcionadas ({len(direcciones)}), convirtiendo a CHIPs...")
+        logger.info(f"  - Direcciones: {direcciones}")
+        
+        # Obtener token para hacer las conversiones
+        logger.info(" PASO 1A: Recuperando token JWT de DynamoDB para conversión...")
+        session_data = get_session_data_from_dynamodb(documento)
+        
+        if not session_data:
+            logger.error("❌ No se encontró token para conversión de direcciones")
+            return build_response(event, {
+                "success": False,
+                "message": "Token de autenticación no encontrado. Por favor reinicia el proceso."
+            }, 200)
+        
+        token = session_data.get('token', '')
+        
+        # Convertir cada dirección a CHIP
+        chips_convertidos = []
+        errores_conversion = []
+        
+        for idx, direccion in enumerate(direcciones, 1):
+            logger.info(f"\n--- Convirtiendo dirección {idx}/{len(direcciones)} ---")
+            logger.info(f"  - Dirección: {direccion}")
+            
+            resultado = obtener_chip_por_direccion(token, direccion)
+            
+            if resultado.get('success'):
+                chip = resultado.get('chip', '')
+                if chip:
+                    chips_convertidos.append(chip)
+                    logger.info(f"✅ CHIP obtenido: {chip}")
+                else:
+                    logger.error(f"❌ API no retornó CHIP para: {direccion}")
+                    errores_conversion.append(f"Dirección '{direccion}': No se obtuvo CHIP")
+            else:
+                logger.error(f"❌ Error convirtiendo dirección: {direccion}")
+                logger.error(f"  - Error: {resultado.get('message', 'Error desconocido')}")
+                errores_conversion.append(f"Dirección '{direccion}': {resultado.get('message', 'Error desconocido')}")
+        
+        logger.info(f"\n📊 Resultado de conversión:")
+        logger.info(f"  - Total direcciones: {len(direcciones)}")
+        logger.info(f"  - CHIPs obtenidos: {len(chips_convertidos)}")
+        logger.info(f"  - Errores: {len(errores_conversion)}")
+        
+        if len(chips_convertidos) == 0:
+            logger.error("❌ No se pudo convertir ninguna dirección a CHIP")
+            return build_response(event, {
+                "success": False,
+                "message": f"No se pudieron obtener CHIPs de las direcciones. Errores: {', '.join(errores_conversion)}"
+            }, 200)
+        
+        # Si hubo errores parciales, avisar pero continuar con los exitosos
+        if len(errores_conversion) > 0:
+            logger.warning(f"⚠️ {len(errores_conversion)} direccion(es) fallaron en conversión")
+        
+        chips = chips_convertidos
+        logger.info(f"✅ CHIPs convertidos exitosamente: {chips}")
+        
+    else:
+        # ============================================================
+        # FLUJO 2: BuscarPredios - Usuario tiene >10 predios
+        # ============================================================
+        logger.info(f" FLUJO BUSCAR PREDIOS")
+        logger.info(" No se proporcionaron direcciones, leyendo CHIPs de DynamoDB...")
+        logger.info("   (Usuario buscó predios y los guardó en DynamoDB con BuscarPredios)")
+        
         chips = obtener_chips_seleccionados_desde_dynamo(documento)
         
         if not chips or len(chips) == 0:
@@ -161,8 +274,6 @@ def handler(event, context):
         
         logger.info(f"✅ CHIPs recuperados de DynamoDB: {chips}")
         logger.info(f"  - Total de CHIPs: {len(chips)}")
-    else:
-        logger.info(f" CHIPs proporcionados como parámetro: {chips}")
     
     # Validar límite de certificados
     if len(chips) > MAX_CERTIFICADOS:
@@ -438,6 +549,209 @@ def obtener_chips_seleccionados_desde_dynamo(documento):
         return []
 
 
+def obtener_chip_por_direccion(token, direccion):
+    """
+    Obtiene el CHIP de un predio usando su dirección.
+    Llama al endpoint GET /properties/address/{address} que retorna la información del predio.
+    Implementa exponential backoff para manejar intermitencias de red.
+    
+    Endpoint: GET /properties/address/{address}
+    Ejemplo: http://vmprocondock.catastrobogota.gov.co:3400/catia-auth/properties/address/KR%207%206%2016%20SUR%20IN%203%20AP%20301
+    
+    Args:
+        token: JWT token de autenticación
+        direccion: Dirección del predio (ej: "KR 7 6 16 SUR IN 3 AP 301")
+    
+    Returns:
+        dict con {success: bool, chip: str, message: str}
+        Ejemplo exitoso: {"success": True, "chip": "AAA000008KLF", "message": "CHIP encontrado"}
+        Ejemplo error: {"success": False, "chip": "", "message": "No se encontró predio"}
+    """
+    from urllib.parse import quote
+    
+    # URL encode de la dirección
+    direccion_encoded = quote(direccion.strip())
+    
+    URL = f"{API_BASE_URL}/properties/address/{direccion_encoded}"
+    
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/json"
+    }
+    
+    logger.info(f"=== Obteniendo CHIP por dirección (con exponential backoff) ===")
+    logger.info(f"  - Endpoint: GET {URL}")
+    logger.info(f"  - Dirección original: {direccion}")
+    logger.info(f"  - Dirección encoded: {direccion_encoded}")
+    logger.info(f"  - Authorization: Bearer {token[:30]}***")
+    
+    last_exception = None
+    
+    for attempt in range(MAX_RETRIES):
+        try:
+            logger.info(f"--- Intento {attempt + 1}/{MAX_RETRIES} ---")
+            
+            resp = requests.get(URL, headers=headers, timeout=15)
+            
+            logger.info(f" Respuesta recibida:")
+            logger.info(f"  - Status Code: {resp.status_code}")
+            logger.info(f"  - Content-Type: {resp.headers.get('Content-Type', 'N/A')}")
+            logger.info(f"  - Content-Length: {len(resp.content)} bytes")
+            
+            # Validar respuesta vacía
+            if not resp.content or len(resp.content) == 0:
+                logger.error(" API retornó respuesta vacía")
+                
+                if attempt == MAX_RETRIES - 1:
+                    return {
+                        "success": False,
+                        "chip": "",
+                        "message": "El servidor retornó una respuesta vacía después de múltiples intentos"
+                    }
+                
+                backoff_time = calculate_backoff(attempt)
+                logger.warning(f" Respuesta vacía. Reintentando en {backoff_time}s...")
+                time.sleep(backoff_time)
+                continue
+            
+            # Parsear JSON
+            try:
+                response_data = resp.json()
+                logger.info(f" JSON parseado exitosamente")
+                logger.info(f"  - Claves: {list(response_data.keys())}")
+            except ValueError as ve:
+                logger.error(f" Respuesta no es JSON válido")
+                logger.error(f"  - Error: {str(ve)}")
+                logger.error(f"  - Respuesta (primeros 300 chars): {resp.text[:300]}")
+                
+                if attempt == MAX_RETRIES - 1:
+                    return {
+                        "success": False,
+                        "chip": "",
+                        "message": "Respuesta inválida del servidor después de múltiples intentos"
+                    }
+                
+                backoff_time = calculate_backoff(attempt)
+                logger.warning(f" Error parseando JSON. Reintentando en {backoff_time}s...")
+                time.sleep(backoff_time)
+                continue
+            
+            # Si llegamos aquí, la petición fue exitosa
+            logger.info(f" Llamada al API completada exitosamente en intento {attempt + 1}")
+            
+            # Procesar respuesta según status code
+            if resp.status_code == 200:
+                logger.info(" Status 200 - Predio encontrado")
+                
+                # Extraer CHIP del response
+                # Estructura esperada: {"success": true, "data": {"chipPredio": {"CHIP": "AAA000008KLF"}}}
+                data = response_data.get('data', {})
+                chip_predio = data.get('chipPredio', {})
+                chip = chip_predio.get('CHIP', '')
+                
+                if not chip:
+                    # Intentar buscar en otros posibles campos
+                    chip = data.get('CHIP', '') or data.get('chip', '')
+                
+                logger.info(f"  - CHIP extraído: {chip}")
+                
+                if chip:
+                    return {
+                        "success": True,
+                        "chip": chip,
+                        "message": "CHIP encontrado exitosamente"
+                    }
+                else:
+                    logger.error(" API no retornó CHIP en la respuesta")
+                    return {
+                        "success": False,
+                        "chip": "",
+                        "message": "No se encontró CHIP en la respuesta del API"
+                    }
+            
+            elif resp.status_code == 404:
+                logger.warning(" Status 404 - Predio no encontrado")
+                return {
+                    "success": False,
+                    "chip": "",
+                    "message": response_data.get('message', 'No se encontró predio con esa dirección')
+                }
+            
+            else:
+                logger.error(f" Status {resp.status_code} - Error inesperado")
+                logger.error(f"  - Response completo: {json.dumps(response_data, ensure_ascii=False)[:500]}")
+                mensaje_error = response_data.get('message', f'Error en el servidor (status {resp.status_code})')
+                return {
+                    "success": False,
+                    "chip": "",
+                    "message": mensaje_error
+                }
+        
+        except requests.exceptions.Timeout as e:
+            last_exception = e
+            logger.error(f" Timeout en intento {attempt + 1}/{MAX_RETRIES} (15 segundos)")
+            
+            if attempt == MAX_RETRIES - 1:
+                logger.error(f" Timeout después de {MAX_RETRIES} intentos")
+                return {
+                    "success": False,
+                    "chip": "",
+                    "message": "Tiempo de espera agotado al obtener el CHIP"
+                }
+            
+            backoff_time = calculate_backoff(attempt)
+            logger.warning(f" Esperando {backoff_time}s antes de reintentar...")
+            time.sleep(backoff_time)
+        
+        except requests.exceptions.ConnectionError as e:
+            last_exception = e
+            logger.error(f" Error de conexión en intento {attempt + 1}/{MAX_RETRIES}: {str(e)}")
+            
+            if attempt == MAX_RETRIES - 1:
+                logger.error(f" Error de conexión después de {MAX_RETRIES} intentos")
+                return {
+                    "success": False,
+                    "chip": "",
+                    "message": "No se pudo conectar con el servidor"
+                }
+            
+            backoff_time = calculate_backoff(attempt)
+            logger.warning(f" Esperando {backoff_time}s antes de reintentar...")
+            time.sleep(backoff_time)
+        
+        except requests.exceptions.RequestException as e:
+            last_exception = e
+            logger.error(f" Error en la solicitud HTTP en intento {attempt + 1}/{MAX_RETRIES}: {str(e)}")
+            
+            if attempt == MAX_RETRIES - 1:
+                logger.error(f" Error en solicitud HTTP después de {MAX_RETRIES} intentos")
+                return {
+                    "success": False,
+                    "chip": "",
+                    "message": "Error en la solicitud HTTP al obtener el CHIP"
+                }
+            
+            backoff_time = calculate_backoff(attempt)
+            logger.warning(f" Esperando {backoff_time}s antes de reintentar...")
+            time.sleep(backoff_time)
+        
+        except Exception as e:
+            logger.exception(f" Error inesperado obteniendo CHIP: {str(e)}")
+            return {
+                "success": False,
+                "chip": "",
+                "message": "Error inesperado al obtener el CHIP"
+            }
+    
+    # Si llegamos aquí, algo salió mal en todos los intentos
+    logger.error(f" Falló después de {MAX_RETRIES} intentos")
+    return {
+        "success": False,
+        "chip": "",
+        "message": f"Error después de {MAX_RETRIES} intentos: {str(last_exception)}"
+    }
+
+
 def generar_certificado(token, chip):
     """
     El certificado es enviado automáticamente al correo del usuario.
@@ -705,7 +1019,7 @@ def build_response(event, response_data, status_code=200):
     Returns:
         dict en formato Bedrock Agent
     """
-    logger.info(f"🔧 Construyendo respuesta para Bedrock Agent:")
+    logger.info(f" Construyendo respuesta para Bedrock Agent:")
     logger.info(f"  - Status Code: {status_code}")
     logger.info(f"  - Action Group: {event.get('actionGroup', 'GenerarCertificados')}")
     logger.info(f"  - Response Body (preview): {json.dumps(response_data, ensure_ascii=False)[:200]}...")

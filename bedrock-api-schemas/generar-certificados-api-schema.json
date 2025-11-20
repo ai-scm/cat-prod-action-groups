@@ -9,7 +9,7 @@
     "/generar-certificados": {
       "post": {
         "summary": "Genera certificados de tradición y libertad",
-        "description": "Genera hasta 3 certificados de tradición y libertad para los CHIPs de predios seleccionados. Los certificados son enviados automáticamente al correo electrónico del usuario y se guarda auditoría en DynamoDB.",
+        "description": "Genera hasta 3 certificados de tradición y libertad. FLUJO A (1-10 predios): Envía array 'direcciones' con direccionReal de los predios seleccionados. FLUJO B (>10 predios): No envíes 'direcciones', los CHIPs se leen de DynamoDB. Los certificados son enviados al correo del usuario.",
         "operationId": "generarCertificados",
         "requestBody": {
           "required": true,
@@ -39,10 +39,13 @@
                     "description": "Nombre completo del ciudadano (usado para auditoría)",
                     "example": "Juan Pérez García"
                   },
-                  "chips": {
-                    "type": "string",
-                    "description": "OPCIONAL: CHIPs de los predios separados por comas (máximo 3). Si no se proporciona, se leen automáticamente de DynamoDB (campo chipsSeleccionados). Ejemplo: 'AAA1234,BBB5678,CCC9012'",
-                    "example": "AAA1234,BBB5678,CCC9012"
+                  "direcciones": {
+                    "type": "array",
+                    "description": "OPCIONAL: Array de direcciones de predios (máximo 3) para usuarios con 1-10 predios. Si no se proporciona, se leen CHIPs de DynamoDB (flujo BuscarPredios para usuarios con >10 predios).",
+                    "items": {
+                      "type": "string"
+                    },
+                    "example": ["KR 7 6 16 SUR IN 3 AP 301", "CL 45 12 34"]
                   },
                   "sessionId": {
                     "type": "string",
