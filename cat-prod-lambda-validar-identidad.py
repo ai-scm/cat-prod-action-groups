@@ -2,6 +2,7 @@ import json
 import os
 import requests
 import logging
+import time
 from typing import Dict, Any
 
 # Configure logging
@@ -11,6 +12,11 @@ logger.setLevel(logging.INFO)
 # Environment variables
 API_BASE_URL = os.environ.get('API_BASE_URL', 'http://vmprocondock.catastrobogota.gov.co:3400/auth-catia')
 API_KEY = os.environ.get('API_KEY', '')
+
+MAX_RETRIES = 8
+INITIAL_BACKOFF = 1  # segundos
+MAX_BACKOFF = 60  # segundos
+
 
 MOCK_USERS = {
     "135791113": {
