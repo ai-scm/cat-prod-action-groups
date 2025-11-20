@@ -13,20 +13,31 @@ API_BASE_URL = os.environ.get('API_BASE_URL', 'http://vmprocondock.catastrobogot
 API_KEY = os.environ.get('API_KEY', '')
 
 MOCK_USERS = {
-    "123456789": {
+    "135791113": {
         "success": True,
+        "message": "Clave temporal enviada exitosamente",
         "data": {
-            "mensaje": "Usuario válido",
-            "emailOfuscado": "",
-        }
+            "mensaje": "Clave temporal enviada exitosamente",
+            "emailOfuscado": "j***@blend360.com",
+            "tiempoExpiracion": 5
+        },
+    "timestamp": "2025-11-20T13:31:16.768Z"
     },
-    "987654321": {
-        "success": False,
-        "message": "Usuario no encontrado",
-        "errorCode": "USER_NOT_FOUND"
-        }
+    "24681012": {
+        "success": True,
+        "message": "Clave temporal enviada exitosamente",
+        "data": {
+            "mensaje": "Clave temporal enviada exitosamente",
+            "emailOfuscado": "j***@blend360.com",
+            "tiempoExpiracion": 5
+        },
+    "timestamp": "2025-11-20T13:31:16.768Z"
+    },
     }
-ENABLE_MOCK = os.environ.get('ENABLE_MOCK', 'false').lower() == 'true'
+
+ENABLE_MOCK = os.environ.get('ENABLE_MOCK', 'true').lower() == 'true'
+
+
 
 def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     """
