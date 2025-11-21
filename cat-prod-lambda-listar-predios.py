@@ -9,6 +9,8 @@ import logging
 import requests
 import boto3
 import time
+import random
+import os
 from botocore.exceptions import ClientError
 
 logger = logging.getLogger()
@@ -26,6 +28,78 @@ MAX_RETRIES = 10
 INITIAL_BACKOFF = 1  # segundos
 MAX_BACKOFF = 60  # segundos
 
+# ============================================================
+# CONFIGURACIÓN DE MODO MOCK
+# ============================================================
+ENABLE_MOCK = os.environ.get('ENABLE_MOCK', 'false').lower() == 'true'
+
+# Usuarios mock para testing (2 usuarios configurables)
+MOCK_USERS = {
+    "123456789": {
+        "nombre": "Juan Carlos",
+        "apellido": "Rodríguez",
+        "email": "juan.rodriguez@catastro.test",
+        "prediosCount": 3,
+        "predios": [
+            {
+                "chip": "AAA0000001ABC",
+                "direccion": "KR 7 6 16 SUR IN 3 AP 301",
+                "matricula": "50C-123456",
+                "tipo": "Urbano",
+                "avaluoCatastral": 150000000,
+                "area": 85.5,
+                "destino": "Apartamento",
+                "estrato": 3
+            },
+            {
+                "chip": "AAA0000002DEF",
+                "direccion": "CL 45 23 10 APTO 501",
+                "matricula": "50C-654321",
+                "tipo": "Urbano",
+                "avaluoCatastral": 200000000,
+                "area": 120.0,
+                "destino": "Apartamento",
+                "estrato": 4
+            },
+            {
+                "chip": "AAA0000003GHI",
+                "direccion": "KR 15 80 30 CASA",
+                "matricula": "50C-789012",
+                "tipo": "Urbano",
+                "avaluoCatastral": 350000000,
+                "area": 180.5,
+                "destino": "Casa",
+                "estrato": 5
+            }
+        ]
+    },
+    "987654321": {
+        "nombre": "María Elena",
+        "apellido": "González",
+        "email": "maria.gonzalez@catastro.test",
+        "prediosCount": 15,
+        "predios": [
+            {
+                "chip": f"BBB000000{i:01d}XYZ",
+                "direccion": f"CALLE {10 + i} # {5 + i}-{20 + i}",
+                "matricula": f"50C-{100000 + i}",
+                "tipo": "Urbano",
+                "avaluoCatastral": 100000000 + (i * 10000000),
+                "area": 50.0 + (i * 5.5),
+                "destino": "Local" if i % 2 == 0 else "Apartamento",
+                "estrato": 2 + (i % 4)
+            }
+            for i in range(1, 16)  # 15 predios para simular flujo BuscarPredios
+        ]
+    }
+}
+
+logger.info(f"[MOCK CONFIG] ENABLE_MOCK = {ENABLE_MOCK}")
+if ENABLE_MOCK:
+    logger.info(f"[MOCK CONFIG] Usuarios mock configurados: {list(MOCK_USERS.keys())}")
+    logger.info(f"[MOCK CONFIG] Usuario 1 tiene {MOCK_USERS['123456789']['prediosCount']} predios")
+    logger.info(f"[MOCK CONFIG] Usuario 2 tiene {MOCK_USERS['987654321']['prediosCount']} predios")
+
 
 def calculate_backoff(attempt):
     """
@@ -41,6 +115,89 @@ def calculate_backoff(attempt):
     """
     backoff = INITIAL_BACKOFF * (2 ** attempt)
     return min(backoff, MAX_BACKOFF)
+
+
+def get_mock_predios_list(documento):
+    """
+    Genera una respuesta simulada para testing sin llamar al API externo.
+    Retorna la lista de predios configurada para el usuario mock.
+    
+    Args:
+        documento: Número de documento del usuario
+    
+    Returns:
+        dict: Respuesta simulada del API con lista de predios
+    """
+    logger.info("[MOCK] 🎭 Generando respuesta mock para ListarPredios")
+    logger.info(f"[MOCK] Documento: {documento[:3]}***")
+    
+    # Simular delay realista del API (0.5s - 2s)
+    delay = random.uniform(0.5, 2.0)
+    logger.info(f"[MOCK] Simulando delay de {delay:.2f} segundos...")
+    time.sleep(delay)
+    
+    # Verificar si el usuario existe en MOCK_USERS
+    if documento in MOCK_USERS:
+        user_data = MOCK_USERS[documento]
+        predios = user_data["predios"]
+        
+        logger.info(f"[MOCK] ✅ Usuario encontrado en MOCK_USERS")
+        logger.info(f"[MOCK] Nombre: {user_data['nombre']} {user_data['apellido']}")
+        logger.info(f"[MOCK] Predios configurados: {len(predios)}")
+        
+        return {
+            'status_code': 200,
+            'data': {
+                "success": True,
+                "message": f"Se encontraron {len(predios)} predio(s) asociado(s) a tu documento (MOCK)",
+                "data": {
+                    "total": len(predios),
+                    "predios": predios,
+                    "mockMode": True
+                }
+            }
+        }
+    else:
+        # Usuario no existe en MOCK - Retornar default de 2 predios genéricos
+        logger.info(f"[MOCK] ⚠️ Usuario NO encontrado en MOCK_USERS")
+        logger.info(f"[MOCK] Usando 2 predios genéricos por defecto")
+        
+        predios_default = [
+            {
+                "chip": "XXX0000001DEF",
+                "direccion": "CALLE 100 # 10-20 APTO 101",
+                "matricula": "50C-999001",
+                "tipo": "Urbano",
+                "avaluoCatastral": 180000000,
+                "area": 95.0,
+                "destino": "Apartamento",
+                "estrato": 4
+            },
+            {
+                "chip": "XXX0000002GHI",
+                "direccion": "KR 50 # 25-30 CASA",
+                "matricula": "50C-999002",
+                "tipo": "Urbano",
+                "avaluoCatastral": 250000000,
+                "area": 150.0,
+                "destino": "Casa",
+                "estrato": 5
+            }
+        ]
+        
+        return {
+            'status_code': 200,
+            'data': {
+                "success": True,
+                "message": f"Se encontraron {len(predios_default)} predio(s) asociado(s) a tu documento (MOCK - usuario genérico)",
+                "data": {
+                    "total": len(predios_default),
+                    "predios": predios_default,
+                    "mockMode": True,
+                    "advertencia": "Este usuario no está en MOCK_USERS, usando predios genéricos"
+                }
+            }
+        }
 
 
 def handler(event, context):
@@ -107,50 +264,82 @@ def handler(event, context):
     logger.info(f" Listando predios para documento: {documento[:3]}***")
     
     try:
-        # 0. Validar y refrescar token si es necesario
-        validate_token_response = validate_token(documento)
+        # ============================================================
+        # DECISIÓN: ¿Usar MOCK o API real?
+        # ============================================================
+        if ENABLE_MOCK:
+            # MODO MOCK: Saltar validación de token y llamada al API externo
+            logger.info("[MOCK] 🎭 MODO MOCK ACTIVADO - Saltando validación de token")
+            logger.info("[MOCK] No se validará token ni se recuperará de DynamoDB")
+            logger.info("[MOCK] Generando respuesta simulada directamente...")
+            
+            api_response = get_mock_predios_list(documento)
+            
+        else:
+            # MODO REAL: Validar token y llamar al API externo
+            logger.info("📡 MODO REAL - Validando token y llamando API externo")
+            
+            # 0. Validar y refrescar token si es necesario
+            logger.info("Validando token")
+            validate_token_response = validate_token(documento)
 
-        if not validate_token_response['success']:
-            logger.error(f"Token inválido: {validate_token_response.get('message')}")
-            return build_response(
-                event=event,
-                body={
+            if not validate_token_response['success']:
+                logger.error(f"Token inválido: {validate_token_response.get('message')}")
+                return build_response(
+                    event=event,
+                    body={
+                        "success": False,
+                        "message": "Tu sesión ha expirado. Por favor, valida tu identidad nuevamente",
+                        "data": {},
+                        "errorCode": "TOKEN_EXPIRED"
+                    },
+                    status_code=401
+                )
+            
+            logger.info("Token validado exitosamente")
+
+            # 1. Obtener token JWT de DynamoDB
+            logger.info("Iniciando recuperación de token desde DynamoDB")
+            token_dict = get_token_from_dynamodb(documento)
+            token = token_dict.get('token', '') if token_dict else ''
+            
+            if not token:
+                logger.error("Token no encontrado en DynamoDB")
+                logger.error("  - Posibles causas:")
+                logger.error("    1. Token expiró (TTL de 10 minutos)")
+                logger.error("    2. Documento incorrecto")
+                logger.error("    3. Usuario no completó validación OTP")
+                return build_response(event, {
                     "success": False,
-                    "message": "Tu sesión ha expirado. Por favor, valida tu identidad nuevamente",
-                    "data": {},
-                    "errorCode": "TOKEN_EXPIRED"
-                },
-                status_code=401
-            )
+                    "message": "Token de autenticación no encontrado o expirado. Por favor reinicia el proceso."
+                }, 401)
+            
+            logger.info("Token recuperado de DynamoDB")
 
-
-        # 1. Obtener token JWT de DynamoDB
-        logger.info(" PASO 1: Recuperando token JWT de DynamoDB...")
-        token_dict = get_token_from_dynamodb(documento)
-        token = token_dict.get('token', '') if token_dict else ''
-        
-        if not token:
-            logger.error("Token no encontrado en DynamoDB")
-            logger.error("  - Posibles causas:")
-            logger.error("    1. Token expiró (TTL de 10 minutos)")
-            logger.error("    2. Documento incorrecto")
-            logger.error("    3. Usuario no completó validación OTP")
-            return build_response(event, {
-                "success": False,
-                "message": "Token de autenticación no encontrado o expirado. Por favor reinicia el proceso."
-            }, 401)
-        
-        logger.info("Token recuperado de DynamoDB")
-
-        # 2. Listar predios desde la API
-        logger.info(f" PASO 2: Obteniendo lista de predios desde la API...")
-        api_response = listar_predios_api(token)
+            # 2. Listar predios desde la API REAL
+            logger.info("📡 Llamando API externa REAL")
+            api_response = listar_predios_api(token)
         
         # 3. Procesar respuesta
         logger.info(f" PASO 3: Procesando respuesta de la API...")
         
-        if api_response.get('success'):
+        # Normalizar respuesta (MOCK retorna {status_code, data}, API real puede retornar directo)
+        if api_response.get('status_code') == 200:
+            # Formato con status_code (MOCK o API con wrapper)
+            response_data = api_response.get('data', {})
+            success = response_data.get('success', True)
+            if success:
+                # Extraer predios del objeto data anidado
+                data_obj = response_data.get('data', {})
+                predios = data_obj.get('predios', [])
+            else:
+                predios = []
+        else:
+            # Formato directo (legacy o error)
+            success = api_response.get('success', False)
             predios = api_response.get('data', [])
+        
+        if success and predios:
             total = len(predios)
             
             logger.info(f" Predios obtenidos exitosamente")
@@ -172,8 +361,14 @@ def handler(event, context):
             return build_response(event, response, 200)
         else:
             # Error en la API
-            error_code = api_response.get('errorCode', 'API_ERROR')
-            message = api_response.get('message', 'Error al obtener la lista de predios')
+            # Extraer mensaje de error según el formato
+            if api_response.get('status_code'):
+                response_data = api_response.get('data', {})
+                error_code = response_data.get('errorCode', 'API_ERROR')
+                message = response_data.get('message', 'Error al obtener la lista de predios')
+            else:
+                error_code = api_response.get('errorCode', 'API_ERROR')
+                message = api_response.get('message', 'Error al obtener la lista de predios')
             
             logger.error(f" Error en la API")
             logger.error(f"  - Error Code: {error_code}")
