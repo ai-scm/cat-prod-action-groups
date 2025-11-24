@@ -115,8 +115,8 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             
             # Map API response to expected schema
             validation_result = {
-                "valido": response_data.get('success', False),
-                "mensaje": response_data.get('data', {}).get('message', ''),
+                "success": response_data.get('success', False),
+                "message": response_data.get('data', {}).get('message', ''),
                 "correo_ofuscado": response_data.get('data', {}).get('emailOfuscado', ''),
                 "correo": "",  # Not provided by API
                 "nombre": nombre
@@ -132,7 +132,8 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             )
         else:
             # Handle API errors
-            logger.error(f"API respondió con error - Status: {api_response['status_code']}, Error: {api_response.get('error', 'Error desconocido')}")
+            response_data = api_response.get('data', {})
+            logger.error(f"API respondió con error - Status: {api_response['status_code']}, Error: {response_data.get('message', 'Error desconocido')}")
             return format_bedrock_response(
                 status_code=api_response['status_code'],
                 body={
@@ -414,7 +415,7 @@ def get_mock_response(documento: str, tipo_documento: str) -> Dict[str, Any]:
                 ':ts': int(time.time())
             },
             ConditionExpression=f"attribute_exists(documento)",
-            ReturnValues="UPDATED_NEW"
+            ReturnValues="ALL_NEW"
         )
 
         logger.info(f"🎭 OTP actualizado en DynamoDB para documento {documento[:3]}")
@@ -424,21 +425,35 @@ def get_mock_response(documento: str, tipo_documento: str) -> Dict[str, Any]:
         logger.error(f"🎭 Error actualizando OTP en DynamoDB para documento {documento}.  Error: {e}")
 
     if success:
-        #send_mock_email(otp)
+        email = response['Attributes'].get('correo', '')
+        otp = response['Attributes'].get('otp', '')
 
-        return {
-        "success": True,
-        "message": "Clave temporal enviada exitosamente",
-        "data": {
-            "mensaje": "Clave temporal enviada exitosamente",
-            "emailOfuscado": "j***@blend360.com",
-            "tiempoExpiracion": 5
-        },
-    "timestamp": "2025-11-20T13:31:16.768Z"
-    }
-    
-    else:
-        return {
+        try:
+            logger.info(f"🎭 Enviando OTP por correo a {email}")
+            if not send_mock_email(email,otp):
+                return{
+                    'status_code': 404,
+                    'data': {
+                        'success': False,
+                        'message': f'Usuario con documento {documento} no encontrado en datos de prueba',
+                        'error': 'USER_NOT_FOUND'
+                    }
+                }
+
+            return {
+            "status_code": 200,
+            "data": {
+                "success": True,
+                "message": "Clave temporal enviada exitosamente",
+                "emailOfuscado": "ju***@blend360.com",
+                "tiempoExpiracion": 5,
+                "timestamp": float(response['Attributes'].get('otp_timestamp', ''))
+            },
+            }
+
+        except Exception as e:
+            logger.error(f"🎭 Error enviando OTP por correo a {email}. Error: {e}")
+            return {
             'status_code': 404,
             'data': {
                 'success': False,
@@ -447,42 +462,13 @@ def get_mock_response(documento: str, tipo_documento: str) -> Dict[str, Any]:
             }
         }
 
-    
-    # Check if user exists in mock data
-
-    if documento in MOCK_USERS:
-        mock_data = MOCK_USERS[documento]
-        logger.info(f"🎭 Mock user found: {documento[:3]}***")
-        logger.info(f"🎭 Mock response: {json.dumps(mock_data)}")
-        
-        # Determine status code based on success field
-        if mock_data.get('success', False):
-            status_code = 200
-        else:
-            # Map error codes to appropriate status codes
-            error_code = mock_data.get('errorCode', '')
-            if error_code in ['USER_NOT_FOUND', 'NO_EMAIL']:
-                status_code = 404
-            elif error_code == 'USER_INACTIVE':
-                status_code = 403
-            elif error_code == 'INVALID_DOCUMENT_TYPE':
-                status_code = 400
-            else:
-                status_code = 400
-        
-        return {
-            'status_code': status_code,
-            'data': mock_data
-        }
     else:
-        # User not in mock data - return user not found
-        logger.warning(f"🎭 Mock user NOT found: {documento[:3]}*** - Returning USER_NOT_FOUND")
         return {
             'status_code': 404,
             'data': {
                 'success': False,
                 'message': f'Usuario con documento {documento} no encontrado en datos de prueba',
-                'errorCode': 'USER_NOT_FOUND'
+                'error': 'USER_NOT_FOUND'
             }
         }
 
@@ -498,11 +484,13 @@ def send_mock_email(email: str, otp: str) -> None:
     logger.info(f"🎭 Simulando envío de correo a {email} con OTP: {otp}")
     
     ses = boto3.client('ses', region_name='us-east-1')
-    subject = "Tu Clave Temporal"
-    body_text = f"Tu clave temporal es: {otp}. Esta clave expirará en 5 minutos."
+    subject = "CatIA TEST - Tú código de verificación"
+    body_text = f"Tu código de verificación es: {otp}. Esta clave expirará en 5 minutos."
     try:
+        verified_email = ses.list_verified_email_addresses()
+        logger.info(f"🎭 Verified emails in SES: {verified_email}")
         response = ses.send_email(
-            Source="",
+            Source="julian.rincon@blend360.com",
             Destination={
                 'ToAddresses': [email]
             },
@@ -517,9 +505,11 @@ def send_mock_email(email: str, otp: str) -> None:
                 }
             }
         )
-        logger.info(f"🎭 Correo simulado enviado exitosamente: {response['Message']}")
+        logger.info(f"🎭 Correo simulado enviado exitosamente: {response}")
+        return True
     except Exception as e:
         logger.error(f"🎭 Error simulando envío de correo: {str(e)}")
+        return False
 
 
 def format_bedrock_response(status_code: int, body: Dict[str, Any], event: Dict[str, Any]) -> Dict[str, Any]:
