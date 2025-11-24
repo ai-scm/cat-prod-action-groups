@@ -17,6 +17,7 @@ logger.setLevel(logging.INFO)
 # Cliente DynamoDB para obtener el token
 dynamodb = boto3.resource('dynamodb', region_name='us-east-1')
 TABLE_NAME = 'cat-test-certification-session-tokens'
+MOCK_USERS_TABLE = 'cat-test-mock-users'
 
 # URL base de la API
 API_BASE_URL = os.environ.get('API_BASE_URL', 'http://vmprocondock.catastrobogota.gov.co:3400/catia-auth')
@@ -31,37 +32,68 @@ MAX_BACKOFF = 60  # segundos
 # ============================================================
 ENABLE_MOCK = os.environ.get('ENABLE_MOCK', 'false').lower() == 'true'
 
-# Usuarios mock para testing (2 usuarios configurables)
-MOCK_USERS = {
-    "123456789": {
-        "nombre": "Juan Carlos",
-        "apellido": "Rodríguez",
-        "email": "juan.rodriguez@catastro.test",
-        "prediosCount": int(os.environ.get('MOCK_PREDIOS_COUNT', '3'))  # Configurable por env var
-    },
-    "987654321": {
-        "nombre": "María Elena",
-        "apellido": "González",
-        "email": "maria.gonzalez@catastro.test",
-        "prediosCount": int(os.environ.get('MOCK_PREDIOS_COUNT', '15'))  # Usuario con muchos predios
-    }
-}
-
 logger.info(f"[MOCK CONFIG] ENABLE_MOCK = {ENABLE_MOCK}")
 if ENABLE_MOCK:
-    logger.info(f"[MOCK CONFIG] Usuarios mock configurados: {list(MOCK_USERS.keys())}")
-    logger.info(f"[MOCK CONFIG] MOCK_PREDIOS_COUNT = {os.environ.get('MOCK_PREDIOS_COUNT', '3 (default)')}")
+    logger.info(f"[MOCK CONFIG] Modo MOCK activado - Generando y guardando conteo aleatorio de predios en {MOCK_USERS_TABLE}")
+
+
+def get_or_generate_mock_predios_count(documento):
+    """
+    Genera aleatoriamente un conteo de predios (5-15) y lo guarda en DynamoDB
+    
+    Args:
+        documento: Número de documento del usuario (Primary Key)
+    
+    Returns:
+        int: Número aleatorio de predios (5-15) guardado en DB
+    """
+    logger.info(f"[MOCK] Generando conteo aleatorio de predios para: {documento[:3]}***")
+    
+    # Generar número aleatorio de predios (5-15)
+    predios_count = random.randint(5, 15)
+    logger.info(f"[MOCK] Generado conteo aleatorio: {predios_count} predios")
+    
+    try:
+        table = dynamodb.Table(MOCK_USERS_TABLE)
+        
+        # Actualizar o crear el campo prediosCount
+        response = table.update_item(
+            Key={'documento': documento},
+            UpdateExpression='SET prediosCount = :prediosCount',
+            ExpressionAttributeValues={
+                ':prediosCount': predios_count
+            },
+            ReturnValues='UPDATED_NEW'
+        )
+        
+        logger.info(f"[MOCK] Conteo guardado en {MOCK_USERS_TABLE}: {predios_count} predios")
+        return predios_count
+        
+    except ClientError as e:
+        error_code = e.response['Error']['Code']
+        error_message = e.response['Error']['Message']
+        logger.error(f"[MOCK] Error guardando prediosCount en {MOCK_USERS_TABLE}: {error_code}")
+        logger.error(f"[MOCK]   - Mensaje: {error_message}")
+        # Si hay error guardando, retornar el número generado (sin persistencia)
+        logger.warning(f"[MOCK] Retornando conteo generado sin guardar: {predios_count}")
+        return predios_count
+    except Exception as e:
+        logger.error(f"[MOCK] Error inesperado guardando prediosCount")
+        logger.error(f"[MOCK]   - Tipo error: {type(e).__name__}")
+        logger.error(f"[MOCK]   - Mensaje: {str(e)}")
+        # Si hay error guardando, retornar el número generado (sin persistencia)
+        logger.warning(f"[MOCK] Retornando conteo generado sin guardar: {predios_count}")
+        return predios_count
 
 def get_mock_response(documento):
     """
-    Genera una respuesta simulada para testing sin llamar al API externo
-    Simula delay realista y retorna conteo de predios configurable
+    Genera una respuesta simulada consultando el conteo de predios desde DynamoDB
     
     Args:
         documento: Número de documento del usuario
     
     Returns:
-        dict: Respuesta simulada del API con conteo de predios
+        dict: Respuesta simulada del API con conteo de predios desde DB
     """
     logger.info("[MOCK] 🎭 Generando respuesta mock para ContarPredios")
     logger.info(f"[MOCK] Documento: {documento[:3]}***")
@@ -71,51 +103,26 @@ def get_mock_response(documento):
     logger.info(f"[MOCK] Simulando delay de {delay:.2f} segundos...")
     time.sleep(delay)
     
-    # Verificar si el usuario existe en MOCK_USERS
-    if documento in MOCK_USERS:
-        user_data = MOCK_USERS[documento]
-        predios_count = user_data["prediosCount"]
-        
-        logger.info(f"[MOCK] ✅ Usuario encontrado en MOCK_USERS")
-        logger.info(f"[MOCK] Nombre: {user_data['nombre']} {user_data['apellido']}")
-        logger.info(f"[MOCK] Predios configurados: {predios_count}")
-        
-        return {
-            'status_code': 200,
-            'data': {
-                "success": True,
-                "message": f"Predios consultados exitosamente (MOCK)",
-                "data": {
-                    "cantidadPredios": predios_count,
-                    "documento": documento,
-                    "nombreUsuario": f"{user_data['nombre']} {user_data['apellido']}",
-                    "mockMode": True
-                },
-                "errorCode": ""
-            }
+    # Generar y guardar conteo de predios en tabla cat-test-mock-users
+    logger.info(f"[MOCK]  Generando y guardando predios en tabla {MOCK_USERS_TABLE}...")
+    predios_count = get_or_generate_mock_predios_count(documento)
+    
+    logger.info(f"[MOCK]  Conteo de predios generado y guardado: {predios_count}")
+    
+    return {
+        'status_code': 200,
+        'data': {
+            "success": True,
+            "message": f"Predios consultados exitosamente (MOCK)",
+            "data": {
+                "cantidadPredios": predios_count,
+                "documento": documento,
+                "nombreUsuario": f"Usuario Mock {documento[:3]}***",
+                "mockMode": True
+            },
+            "errorCode": ""
         }
-    else:
-        # Usuario no existe en MOCK - Retornar default de 3 predios
-        default_count = int(os.environ.get('MOCK_PREDIOS_COUNT', '3'))
-        
-        logger.info(f"[MOCK] ⚠️ Usuario NO encontrado en MOCK_USERS")
-        logger.info(f"[MOCK] Usando conteo default: {default_count} predios")
-        
-        return {
-            'status_code': 200,
-            'data': {
-                "success": True,
-                "message": f"Predios consultados exitosamente (MOCK - usuario genérico)",
-                "data": {
-                    "cantidadPredios": default_count,
-                    "documento": documento,
-                    "nombreUsuario": "Usuario Mock Genérico",
-                    "mockMode": True,
-                    "advertencia": "Este usuario no está en MOCK_USERS, usando conteo default"
-                },
-                "errorCode": ""
-            }
-        }
+    }
 
 
 def lambda_handler(event, context):
