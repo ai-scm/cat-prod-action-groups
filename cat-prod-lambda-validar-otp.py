@@ -18,6 +18,7 @@ logger.setLevel(logging.INFO)
 # Cliente DynamoDB
 dynamodb = boto3.resource('dynamodb', region_name='us-east-1')
 TABLE_NAME = 'cat-test-certification-session-tokens'
+MOCK_USERS_TABLE = 'cat-test-mock-users'
 
 # Configuración de reintentos con exponential backoff
 MAX_RETRIES = 10
@@ -52,59 +53,141 @@ if ENABLE_MOCK:
     logger.info(f"[MOCK CONFIG] Usuarios mock configurados: {list(MOCK_USERS.keys())}")
 
 
+def get_mock_user_from_dynamodb(documento):
+    """
+    Consulta usuario mock en tabla cat-test-mock-users (SOLO LECTURA)
+    
+    Args:
+        documento: Número de documento del usuario (Primary Key)
+    
+    Returns:
+        dict: Datos esenciales del usuario {otp, tipoDocumento, documento} o None si no existe
+    """
+    logger.info(f"[MOCK]  Consultando usuario mock en DynamoDB: {documento[:3]}***")
+    
+    try:
+        table = dynamodb.Table(MOCK_USERS_TABLE)
+        
+        # Consulta por Primary Key (documento)
+        response = table.get_item(Key={'documento': documento})
+        
+        if 'Item' in response:
+            user_data = response['Item']
+            logger.info(f"[MOCK]  Usuario encontrado en {MOCK_USERS_TABLE}")
+            logger.info(f"[MOCK]   - Tipo documento: {user_data.get('tipoDocumento', 'N/A')}")
+            logger.info(f"[MOCK]   - OTP almacenado: {user_data.get('otp', 'N/A')[:2]}****")
+            logger.info(f"[MOCK]   - Email: {user_data.get('correo', 'N/A')}")
+            
+            return {
+                'otp': user_data.get('otp'),
+                'tipoDocumento': user_data.get('tipoDocumento'),
+                'correo': user_data.get('correo'),  # ← EMAIL de la tabla mock
+                'documento': documento
+            }
+        else:
+            logger.warning(f"[MOCK]  Usuario NO encontrado en {MOCK_USERS_TABLE}: {documento[:3]}***")
+            return None
+            
+    except ClientError as e:
+        error_code = e.response['Error']['Code']
+        error_message = e.response['Error']['Message']
+        logger.error(f"[MOCK]  Error consultando {MOCK_USERS_TABLE}: {error_code}")
+        logger.error(f"[MOCK]   - Mensaje: {error_message}")
+        logger.error(f"[MOCK]   - Documento: {documento[:3]}***")
+        return None
+    except Exception as e:
+        logger.error(f"[MOCK]  Error inesperado consultando usuario mock")
+        logger.error(f"[MOCK]   - Tipo error: {type(e).__name__}")
+        logger.error(f"[MOCK]   - Mensaje: {str(e)}")
+        return None
+
+
 def get_mock_otp_response(documento, codigo, tipo_documento):
     """
-    Genera una respuesta simulada para validación de OTP
-    ACEPTA CUALQUIER código de 4 dígitos como válido
+    Genera respuesta simulada validando OTP contra tabla cat-test-mock-users
     
     Args:
         documento: Número de documento del usuario
-        codigo: Código OTP (cualquier 4 dígitos)
+        codigo: Código OTP enviado (debe coincidir con otp en DynamoDB)
         tipo_documento: Tipo de documento (CC, CE, etc.)
     
     Returns:
-        dict: Respuesta simulada del API con token JWT mock
+        dict: Respuesta simulada con validación real contra DynamoDB
     """
     logger.info("[MOCK] 🎭 Generando respuesta mock para ValidarOTP")
     logger.info(f"[MOCK] Documento: {tipo_documento}-{documento[:3]}***")
-    logger.info(f"[MOCK] Código: {codigo[:2]}****")
+    logger.info(f"[MOCK] Código: {codigo[:2] if codigo else 'N/A'}****")
     
     # Simular delay realista del API (0.5s - 2s)
     delay = random.uniform(0.5, 2.0)
     logger.info(f"[MOCK] Simulando delay de {delay:.2f} segundos...")
     time.sleep(delay)
     
-    # Validar formato del código (debe ser 4 dígitos)
+    # Validar formato básico del código
     if not codigo or len(codigo) != 4 or not codigo.isdigit():
-        logger.warning(f"[MOCK] ⚠️ Código inválido (debe ser 4 dígitos): {codigo}")
+        logger.warning(f"[MOCK]  Código inválido (debe ser 4 dígitos): {codigo}")
         return {
             "success": False,
             "intentosRestantes": 2,
-            "message": "❌ Código incorrecto. Te quedan 2 intento(s)"
+            "message": " Código incorrecto. Te quedan 2 intento(s)"
         }
+    
+    #  Consultar usuario en tabla cat-test-mock-users
+    logger.info(f"[MOCK]  Validando contra tabla {MOCK_USERS_TABLE}...")
+    user_data = get_mock_user_from_dynamodb(documento)
+    
+    if not user_data:
+        logger.warning(f"[MOCK]  Usuario no encontrado en {MOCK_USERS_TABLE}")
+        return {
+            "success": False,
+            "intentosRestantes": 2,
+            "message": " Usuario no encontrado en el sistema"
+        }
+    
+    # Validar tipo de documento
+    if user_data['tipoDocumento'] != tipo_documento:
+        logger.warning(f"[MOCK]  Tipo documento no coincide:")
+        logger.warning(f"[MOCK]   - Enviado: {tipo_documento}")
+        logger.warning(f"[MOCK]   - Almacenado: {user_data['tipoDocumento']}")
+        return {
+            "success": False,
+            "intentosRestantes": 2,
+            "message": " Tipo de documento no coincide"
+        }
+    
+    #  Validar código OTP contra el almacenado
+    otp_almacenado = user_data['otp']
+    logger.info(f"[MOCK]  Comparando códigos:")
+    logger.info(f"[MOCK]   - Enviado: {codigo}")
+    logger.info(f"[MOCK]   - Almacenado: {otp_almacenado}")
+    
+    if otp_almacenado != codigo:
+        logger.warning(f"[MOCK]  Código OTP no coincide")
+        return {
+            "success": False,
+            "intentosRestantes": 2,
+            "message": " Código incorrecto. Te quedan 2 intento(s)"
+        }
+    
+    #  OTP VÁLIDO - Generar respuesta exitosa
+    logger.info(f"[MOCK]  OTP VÁLIDO - Usuario autenticado exitosamente")
     
     # Generar token JWT mock (formato realista)
     timestamp = int(time.time())
     token_mock = f"MOCK_JWT_TOKEN_{documento}_{timestamp}_{random.randint(1000, 9999)}"
     refresh_token_mock = f"MOCK_REFRESH_TOKEN_{documento}_{timestamp}_{random.randint(5000, 9999)}"
     
-    # Obtener datos del usuario si existe en MOCK_USERS
-    if documento in MOCK_USERS:
-        user_data = MOCK_USERS[documento]
-        logger.info(f"[MOCK] ✅ Usuario encontrado en MOCK_USERS: {user_data['nombre']} {user_data['apellido']}")
-    else:
-        # Usuario genérico
-        logger.info(f"[MOCK] ⚠️ Usuario NO encontrado en MOCK_USERS, usando datos genéricos")
-        user_data = {
-            "tipoDocumento": tipo_documento,
-            "nombre": "Usuario Mock",
-            "apellido": "Genérico",
-            "email": f"mock{documento[:3]}***@catastro.test",
-            "numeroDocumento": documento
-        }
+    # Datos del usuario para respuesta
+    usuario_data = {
+        "tipoDocumento": user_data['tipoDocumento'],
+        "nombre": f"Usuario Mock {documento[:3]}***",
+        "apellido": "Mock",
+        "email": user_data.get('correo'), 
+        "numeroDocumento": documento
+    }
     
-    logger.info(f"[MOCK] ✅ OTP ACEPTADO - Generando token mock")
     logger.info(f"[MOCK] Token generado (longitud): {len(token_mock)} caracteres")
+    logger.info(f"[MOCK] Usuario: {usuario_data['nombre']} {usuario_data['apellido']}")
     
     return {
         "success": True,
@@ -114,7 +197,7 @@ def get_mock_otp_response(documento, codigo, tipo_documento):
         "refreshToken": refresh_token_mock,
         "tokenType": "Bearer",
         "expiresIn": 600,  # 10 minutos
-        "usuario": user_data
+        "usuario": usuario_data
     }
 
 
@@ -208,7 +291,7 @@ def handler(event, context):
         # DECISIÓN: ¿Usar MOCK o API real?
         if ENABLE_MOCK:
             logger.info("[MOCK] 🎭 Usando validación MOCK (API externa NO será llamada)")
-            logger.info("[MOCK] ACEPTA CUALQUIER código de 4 dígitos")
+            logger.info("[MOCK] Valida código OTP contra tabla cat-test-mock-users")
             api_response = get_mock_otp_response(documento, codigo, tipo_documento)
         else:
             logger.info("📡 Llamando API externa REAL")
