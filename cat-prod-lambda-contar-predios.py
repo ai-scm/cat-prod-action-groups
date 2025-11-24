@@ -59,9 +59,9 @@ def get_or_generate_mock_predios_count(documento):
         # Actualizar o crear el campo prediosCount
         response = table.update_item(
             Key={'documento': documento},
-            UpdateExpression='SET prediosCount = :prediosCount',
+            UpdateExpression='SET numPredios = :numPredios',
             ExpressionAttributeValues={
-                ':prediosCount': predios_count
+                ':numPredios': predios_count
             },
             ReturnValues='UPDATED_NEW'
         )

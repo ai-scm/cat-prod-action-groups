@@ -19,6 +19,7 @@ logger.setLevel(logging.INFO)
 # Cliente DynamoDB
 dynamodb = boto3.resource('dynamodb', region_name='us-east-1')
 TABLE_NAME = 'cat-test-certification-session-tokens'
+MOCK_USERS_TABLE = 'cat-test-mock-users'
 
 # Base URL de la API
 API_BASE_URL = "http://vmprocondock.catastrobogota.gov.co:3400/catia-auth"
@@ -133,9 +134,43 @@ def get_mock_predios_list(documento):
     
     # Simular delay realista del API (0.5s - 2s)
     delay = random.uniform(0.5, 2.0)
+    dynamo_mock_table = dynamodb.Table(MOCK_USERS_TABLE)
     logger.info(f"[MOCK] Simulando delay de {delay:.2f} segundos...")
     time.sleep(delay)
     
+    response = dynamo_mock_table.get_item(Key={'documento': documento})
+    mock_user = response.get('Item', None)
+    num_predios = int(mock_user.get('numPredios', 0)) if mock_user else 0
+    logger.info(f"[MOCK] Usuario mock en DynamoDB tiene numPredios = {num_predios}")
+
+    predios = []
+    for i in range(1, num_predios + 1):
+        predio = {
+            "chip": f"MOCKCHIP{i:04d}",
+            "direccion": f"CALLE MOCK {i} # {i*10}-{i*5}",
+            "matricula": f"50C-MOCK{i:05d}",
+            "tipo": "Urbano",
+            "avaluoCatastral": 100000000 + (i * 5000000),
+            "area": 60.0 + (i * 2.5),
+            "destino": "Apartamento" if i % 2 == 0 else "Casa",
+            "estrato": 3 + (i % 3)
+        }
+        predios.append(predio)
+    
+    return {
+        'status_code': 200,
+        'data': {
+            "success": True,
+            "message": f"Se encontraron {len(predios)} predio(s) asociado(s) a tu documento (MOCK - DynamoDB)",
+            "data": {
+                "total": len(predios),
+                "predios": predios,
+                "mockMode": True
+            }
+        }
+    }
+
+
     # Verificar si el usuario existe en MOCK_USERS
     if documento in MOCK_USERS:
         user_data = MOCK_USERS[documento]
@@ -264,11 +299,7 @@ def handler(event, context):
     logger.info(f" Listando predios para documento: {documento[:3]}***")
     
     try:
-        # ============================================================
-        # DECISIÓN: ¿Usar MOCK o API real?
-        # ============================================================
         if ENABLE_MOCK:
-            # MODO MOCK: Saltar validación de token y llamada al API externo
             logger.info("[MOCK] 🎭 MODO MOCK ACTIVADO - Saltando validación de token")
             logger.info("[MOCK] No se validará token ni se recuperará de DynamoDB")
             logger.info("[MOCK] Generando respuesta simulada directamente...")
@@ -414,9 +445,6 @@ def handler(event, context):
             "total": 0,
             "predios": []
         }, 200)
-
-
-
 
 def listar_predios_api(token):
     """

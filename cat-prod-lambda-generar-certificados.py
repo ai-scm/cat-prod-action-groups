@@ -1006,7 +1006,6 @@ def obtener_chip_por_direccion(token, direccion):
         "message": f"Error después de {MAX_RETRIES} intentos: {str(last_exception)}"
     }
 
-
 def generar_certificado(token, chip):
     """
     El certificado es enviado automáticamente al correo del usuario.
