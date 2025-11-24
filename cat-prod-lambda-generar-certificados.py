@@ -264,28 +264,80 @@ def handler(event, context):
             tipo_documento = body.get('tipoDocumento', '')
             
             # Direcciones (solo para flujo ListarPredios)
-            # Puede venir como string separado por comas, como lista, o como string JSON
+            # Puede venir en varios formatos desde el Agent:
+            # - lista real (list)
+            # - string JSON: '["a","b"]'
+            # - string doble-encoded: '"[\\"a\\",\\"b\\"]"'
+            # - comma-separated string: 'a, b'
             direcciones_raw = body.get('direcciones', '')
-            if isinstance(direcciones_raw, str):
-                # Intentar parsear como JSON si tiene formato de array
-                if direcciones_raw.strip().startswith('['):
-                    try:
-                        direcciones = json.loads(direcciones_raw)
-                        if not isinstance(direcciones, list):
-                            direcciones = []
-                    except (json.JSONDecodeError, ValueError):
-                        # Si falla el JSON parse, intentar split por comas
-                        direcciones = [dir.strip() for dir in direcciones_raw.split(',') if dir.strip()]
-                else:
-                    # Si viene como string "KR 7...,KR 7..."
-                    direcciones = [dir.strip() for dir in direcciones_raw.split(',') if dir.strip()]
-            elif isinstance(direcciones_raw, list):
+            logger.info(f" Raw 'direcciones' recibido (tipo: {type(direcciones_raw).__name__}): {str(direcciones_raw)[:200]}")
+
+            direcciones = []
+
+            if isinstance(direcciones_raw, list):
                 direcciones = direcciones_raw
+
+            elif isinstance(direcciones_raw, str):
+                logger.info("'direcciones' viene como string. Intentando normalizar a lista...")
+                temp = direcciones_raw.strip()
+
+                # Intentar parsear JSON hasta 3 niveles (maneja doble-encoding)
+                for attempt in range(3):
+                    if temp.startswith('[') and temp.endswith(']'):
+                        try:
+                            parsed = json.loads(temp)
+                            if isinstance(parsed, list):
+                                direcciones = parsed
+                                logger.info(f"Parse exitoso a lista en attempt {attempt+1}")
+                                break
+                            # Si parsed es string, puede ser doble-encoded - repetir
+                            if isinstance(parsed, str):
+                                temp = parsed
+                                logger.info("Parse devolvió string - posible doble encoding, intentando de nuevo")
+                                continue
+                            # Si no es lista ni string, romper
+                            break
+                        except (json.JSONDecodeError, ValueError) as e:
+                            logger.warning(f"json.loads falló en attempt {attempt+1}: {e}")
+                            break
+                    else:
+                        # No parece JSON array, salir del loop
+                        break
+
+                # Si aún no logramos una lista, intentar detectar formato con corchetes sin comillas
+                if not direcciones:
+                    # Caso común del bot intermedio: "[KR 7 6 16 SUR GJ 169]" (sin comillas internas)
+                    if temp.startswith('[') and temp.endswith(']'):
+                        inner = temp[1:-1].strip()
+                        # Remover comillas envolventes si existen
+                        if (inner.startswith('"') and inner.endswith('"')) or (inner.startswith("'") and inner.endswith("'")):
+                            inner = inner[1:-1].strip()
+
+                        if ',' in inner:
+                            direcciones = [p.strip().strip('"').strip("'") for p in inner.split(',') if p.strip()]
+                        elif inner:
+                            direcciones = [inner]
+                    else:
+                        # fallback: split por comas sobre el valor original
+                        direcciones = [d.strip() for d in direcciones_raw.split(',') if d.strip()]
+
             else:
                 direcciones = []
             
-            # Limpiar strings vacíos del array
-            direcciones = [d.strip() for d in direcciones if d and d.strip()]
+            # Limpiar strings vacíos del array y asegurar que todos sean strings
+            cleaned = []
+            for d in direcciones:
+                if isinstance(d, str) and d and d.strip():
+                    cleaned.append(d.strip())
+                else:
+                    # Attempt to coerce non-string values
+                    try:
+                        coerced = str(d).strip()
+                        if coerced:
+                            cleaned.append(coerced)
+                    except Exception:
+                        continue
+            direcciones = cleaned
             
             session_id = body.get('sessionId', event.get('sessionId', ''))
         else:
