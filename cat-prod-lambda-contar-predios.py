@@ -67,6 +67,7 @@ def get_or_generate_mock_predios_count(documento):
         )
         
         logger.info(f"[MOCK] Conteo guardado en {MOCK_USERS_TABLE}: {predios_count} predios")
+        logger.info(f"🎭 Response:{response}")
         return predios_count
         
     except ClientError as e:

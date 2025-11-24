@@ -34,12 +34,8 @@ MAX_BACKOFF = 60  # segundos
 # Límite de certificados por solicitud
 MAX_CERTIFICADOS = 3
 
-# ============================================================
-# CONFIGURACIÓN DE MODO MOCK
-# ============================================================
+MOCK_USERS_TABLE = 'cat-test-mock-users'
 ENABLE_MOCK = os.environ.get('ENABLE_MOCK', 'false').lower() == 'true'
-
-# Usuarios mock para testing (mismos que contar-predios y listar-predios)
 MOCK_USERS = {
     "123456789": {
         "nombre": "Juan Carlos",
@@ -161,7 +157,47 @@ def get_mock_chip_por_direccion(direccion):
     }
 
 
-def get_mock_certificado_response(chip):
+def send_mock_email(email: str, otp: str) -> None:
+    """
+    Simula el envío de un correo electrónico con la OTP
+    
+    Args:
+        email: Dirección de correo electrónico del usuario
+        otp: Clave temporal a enviar
+    """
+    logger.info(f"🎭 Simulando envío de correo a {email} con OTP: {otp}")
+    
+    ses = boto3.client('ses', region_name='us-east-1')
+    subject = "CatIA TEST - Tú código de verificación"
+    body_text = f"Tu código de verificación es: {otp}. Esta clave expirará en 5 minutos."
+    try:
+        verified_email = ses.list_verified_email_addresses()
+        logger.info(f"🎭 Verified emails in SES: {verified_email}")
+        response = ses.send_email(
+            Source="julian.rincon@blend360.com",
+            Destination={
+                'ToAddresses': [email]
+            },
+            Message={
+                'Subject': {
+                    'Data': subject
+                },
+                'Body': {
+                    'Text': {
+                        'Data': body_text
+                    }
+                }
+            }
+        )
+        logger.info(f"🎭 Correo simulado enviado exitosamente: {response}")
+        return True
+    except Exception as e:
+        logger.error(f"🎭 Error simulando envío de correo: {str(e)}")
+        return False
+
+
+
+def get_mock_certificado_response(documento,chip):
     """
     Simula la generación de un certificado sin llamar al API externo.
     
@@ -183,12 +219,41 @@ def get_mock_certificado_response(chip):
     
     logger.info(f"[MOCK] ✅ Certificado generado exitosamente")
     logger.info(f"[MOCK] Request Number: {request_number}")
+
+    try:
+        dynamo_mock_table = dynamodb.Table(MOCK_USERS_TABLE)
+
+        response = dynamo_mock_table.get_item(Key={'documento': documento})
+        mock_user = response.get('Item', None)
+        email = mock_user.get('correo', '') if mock_user else ''
+        if email:
+            logger.info(f"[MOCK] Enviando certificado al correo: {email}")
+            if send_mock_email(email, request_number):
+                logger.info(f"[MOCK] Correo simulado enviado exitosamente a {email}")
+                return {
+                        "success": True,
+                        "message": "Certificado generado y enviado al correo exitosamente (MOCK)",
+                        "requestNumber": request_number
+                    }
+            else:
+                logger.error(f"[MOCK] Error simulando envío de correo a {email}")
+                return {
+                        "success": False,
+                        "message": "Error enviando al correo (MOCK)",
+                        "requestNumber": request_number
+                    }
+        else:
+            logger.error(f"[MOCK] No se encontró correo electrónico para el usuario mock")
+            return {
+                        "success": False,
+                        "message": "Error enviando al correo (MOCK)",
+                        "requestNumber": request_number
+                    }
+    except Exception as e:
+        logger.error(f"[MOCK] Error enviando correo: {str(e)}")
+
     
-    return {
-        "success": True,
-        "message": "Certificado generado y enviado al correo exitosamente (MOCK)",
-        "requestNumber": request_number
-    }
+    
 
 
 def handler(event, context):
@@ -580,7 +645,7 @@ def handler(event, context):
             # ============================================================
             if ENABLE_MOCK:
                 logger.info(f"[MOCK] 🎭 Generando certificado mock para CHIP: {chip}")
-                resultado = get_mock_certificado_response(chip)
+                resultado = get_mock_certificado_response(documento,chip)
             else:
                 logger.info(f"📡 Generando certificado REAL para CHIP: {chip}")
                 resultado = generar_certificado(token, chip)

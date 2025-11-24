@@ -147,8 +147,8 @@ def get_mock_predios_list(documento):
     for i in range(1, num_predios + 1):
         predio = {
             "chip": f"MOCKCHIP{i:04d}",
-            "direccion": f"CALLE MOCK {i} # {i*10}-{i*5}",
-            "matricula": f"50C-MOCK{i:05d}",
+            "direccion": f"CALLE {i} # {i*10}-{i*5}",
+            "matricula": f"50C-{i:05d}",
             "tipo": "Urbano",
             "avaluoCatastral": 100000000 + (i * 5000000),
             "area": 60.0 + (i * 2.5),
