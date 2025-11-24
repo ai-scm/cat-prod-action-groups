@@ -3,6 +3,7 @@ import os
 import requests
 import logging
 import time
+import boto3
 from typing import Dict, Any
 
 # Configure logging
@@ -17,7 +18,7 @@ MAX_RETRIES = 8
 INITIAL_BACKOFF = 1  # segundos
 MAX_BACKOFF = 60  # segundos
 
-
+MOCK_TABLE = "cat-test-mock-users"
 MOCK_USERS = {
     "135791113": {
         "success": True,
@@ -40,9 +41,7 @@ MOCK_USERS = {
     "timestamp": "2025-11-20T13:31:16.768Z"
     },
     }
-
 ENABLE_MOCK = os.environ.get('ENABLE_MOCK', 'true').lower() == 'true'
-
 
 
 def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
@@ -117,7 +116,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             # Map API response to expected schema
             validation_result = {
                 "valido": response_data.get('success', False),
-                "mensaje": response_data.get('data', {}).get('mensaje', ''),
+                "mensaje": response_data.get('data', {}).get('message', ''),
                 "correo_ofuscado": response_data.get('data', {}).get('emailOfuscado', ''),
                 "correo": "",  # Not provided by API
                 "nombre": nombre
@@ -138,7 +137,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 status_code=api_response['status_code'],
                 body={
                     "valido": False,
-                    "mensaje": f"Error en la validación: {api_response.get('error', 'Error desconocido')}"
+                    "mensaje": f"Error en la validación: {api_response.get('message', 'Error desconocido')}"
                 },
                 event=event
             )
@@ -394,10 +393,63 @@ def get_mock_response(documento: str, tipo_documento: str) -> Dict[str, Any]:
     # Simulate network delay (random between 0.5-2 seconds)
     import random
     delay = random.uniform(0.5, 2.0)
+    random_otp = random.randint(1000, 9999)
+    success = False
+
+    dynamodb = boto3.resource('dynamodb', region_name='us-east-1')
+    
     logger.info(f"🎭 Simulating API delay: {delay:.2f}s")
     time.sleep(delay)
+
+    # Update OTP in DynamoDB table    
+    db_table = dynamodb.Table(MOCK_TABLE)
+
+    try:
+        logger.info(f"🎭 Actualizando OTP en DynamoDB para documento {documento[:3]}***")
+        response = db_table.update_item(
+            Key={'documento': documento},
+            UpdateExpression="SET otp = :otp, otp_timestamp = :ts",
+            ExpressionAttributeValues={
+                ':otp': str(random_otp),
+                ':ts': int(time.time())
+            },
+            ConditionExpression=f"attribute_exists(documento)",
+            ReturnValues="UPDATED_NEW"
+        )
+
+        logger.info(f"🎭 OTP actualizado en DynamoDB para documento {documento[:3]}")
+        logger.info(f"🎭 OTP response:{response}")
+        success = True
+    except Exception as e:
+        logger.error(f"🎭 Error actualizando OTP en DynamoDB para documento {documento}.  Error: {e}")
+
+    if success:
+        #send_mock_email(otp)
+
+        return {
+        "success": True,
+        "message": "Clave temporal enviada exitosamente",
+        "data": {
+            "mensaje": "Clave temporal enviada exitosamente",
+            "emailOfuscado": "j***@blend360.com",
+            "tiempoExpiracion": 5
+        },
+    "timestamp": "2025-11-20T13:31:16.768Z"
+    }
+    
+    else:
+        return {
+            'status_code': 404,
+            'data': {
+                'success': False,
+                'message': f'Usuario con documento {documento} no encontrado en datos de prueba',
+                'error': 'USER_NOT_FOUND'
+            }
+        }
+
     
     # Check if user exists in mock data
+
     if documento in MOCK_USERS:
         mock_data = MOCK_USERS[documento]
         logger.info(f"🎭 Mock user found: {documento[:3]}***")
@@ -433,6 +485,41 @@ def get_mock_response(documento: str, tipo_documento: str) -> Dict[str, Any]:
                 'errorCode': 'USER_NOT_FOUND'
             }
         }
+
+
+def send_mock_email(email: str, otp: str) -> None:
+    """
+    Simula el envío de un correo electrónico con la OTP
+    
+    Args:
+        email: Dirección de correo electrónico del usuario
+        otp: Clave temporal a enviar
+    """
+    logger.info(f"🎭 Simulando envío de correo a {email} con OTP: {otp}")
+    
+    ses = boto3.client('ses', region_name='us-east-1')
+    subject = "Tu Clave Temporal"
+    body_text = f"Tu clave temporal es: {otp}. Esta clave expirará en 5 minutos."
+    try:
+        response = ses.send_email(
+            Source="",
+            Destination={
+                'ToAddresses': [email]
+            },
+            Message={
+                'Subject': {
+                    'Data': subject
+                },
+                'Body': {
+                    'Text': {
+                        'Data': body_text
+                    }
+                }
+            }
+        )
+        logger.info(f"🎭 Correo simulado enviado exitosamente: {response['Message']}")
+    except Exception as e:
+        logger.error(f"🎭 Error simulando envío de correo: {str(e)}")
 
 
 def format_bedrock_response(status_code: int, body: Dict[str, Any], event: Dict[str, Any]) -> Dict[str, Any]:
