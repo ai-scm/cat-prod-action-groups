@@ -728,9 +728,10 @@ def handler(event, context):
             "totalExitosos": exitosos,
             "totalFallidos": fallidos
         }
-        
-        del_chips = delete_mock_chips_seleccionados(documento)
-        
+        if ENABLE_MOCK:
+            logger.info("[MOCK] 🎭 Limpiando chips seleccionados en DynamoDB para usuario mock...")
+            del_chips = delete_mock_chips_seleccionados(documento)
+
         return build_response(event, response, 200 if success else 200)  # 207 = Multi-Status
         
     except requests.exceptions.Timeout:
