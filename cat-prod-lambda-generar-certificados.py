@@ -21,6 +21,7 @@ logger.setLevel(logging.INFO)
 # Clientes AWS
 dynamodb = boto3.resource('dynamodb', region_name='us-east-1')
 TABLE_TOKENS = 'cat-test-certification-session-tokens'
+MOCK_USERS_TABLE = 'cat-test-mock-users'
 TABLE_AUDITORIA = 'cat-test-certification-data'
 
 # Base URL de la API
@@ -156,8 +157,7 @@ def get_mock_chip_por_direccion(direccion):
         "message": "CHIP encontrado exitosamente (MOCK)"
     }
 
-
-def send_mock_email(email: str, otp: str) -> None:
+def send_mock_email(email: str, request_number: str) -> None:
     """
     Simula el envío de un correo electrónico con la OTP
     
@@ -165,11 +165,17 @@ def send_mock_email(email: str, otp: str) -> None:
         email: Dirección de correo electrónico del usuario
         otp: Clave temporal a enviar
     """
-    logger.info(f"🎭 Simulando envío de correo a {email} con OTP: {otp}")
+    logger.info(f"🎭 Simulando envío de correo a {email} con OTP: {request_number}")
     
     ses = boto3.client('ses', region_name='us-east-1')
-    subject = "CatIA TEST - Tú código de verificación"
-    body_text = f"Tu código de verificación es: {otp}. Esta clave expirará en 5 minutos."
+    subject = "CatIA TEST - Certificado Catastral"
+    body_text = f"""Estimado usuario,
+
+    Su certificado catastral ha sido generado exitosamente. 
+    Su número de radicado es: {request_number}
+    Saludos,
+    
+    """
     try:
         verified_email = ses.list_verified_email_addresses()
         logger.info(f"🎭 Verified emails in SES: {verified_email}")
@@ -195,7 +201,25 @@ def send_mock_email(email: str, otp: str) -> None:
         logger.error(f"🎭 Error simulando envío de correo: {str(e)}")
         return False
 
+def delete_mock_chips_seleccionados(documento):
+    """
+    Elimina los chips seleccionados del usuario mock en DynamoDB.
+    
+    Args:
+        documento: Número de documento del usuario
+    """
+    logger.info(f"[MOCK] 🎭 Eliminando chips seleccionados para documento: {documento[:3]}***")
+    try:
+        dynamo_mock_table = dynamodb.Table(MOCK_USERS_TABLE)
 
+        response = dynamo_mock_table.update_item(
+            Key={'documento': documento},
+            UpdateExpression="REMOVE chipsSeleccionados",
+            ReturnValues="UPDATED_NEW"
+        )
+        logger.info(f"[MOCK] Chips seleccionados eliminados exitosamente")
+    except Exception as e:
+        logger.error(f"[MOCK] Error eliminando chips seleccionados: {str(e)}")
 
 def get_mock_certificado_response(documento,chip):
     """
@@ -251,10 +275,6 @@ def get_mock_certificado_response(documento,chip):
                     }
     except Exception as e:
         logger.error(f"[MOCK] Error enviando correo: {str(e)}")
-
-    
-    
-
 
 def handler(event, context):
     """
@@ -556,7 +576,11 @@ def handler(event, context):
         # Esto previene que se generen certificados sin predios asociados
         # ============================================================
         logger.info("📊 PASO 1: Validando si usuario tiene predios en DynamoDB...")
-        chips = obtener_chips_seleccionados_desde_dynamo(documento)
+
+        if ENABLE_MOCK:
+            chips = obtener_chips_seleccionados_desde_dynamo_mock(documento)
+        else:
+            chips = obtener_chips_seleccionados_desde_dynamo(documento)
         
         if not chips or len(chips) == 0:
             logger.error("❌ No se encontraron CHIPs seleccionados en DynamoDB")
@@ -601,7 +625,7 @@ def handler(event, context):
             
             # En modo MOCK, si no hay datos en DynamoDB, usar datos simulados
             # pero SOLO si es un usuario conocido de MOCK_USERS
-            if ENABLE_MOCK and documento in MOCK_USERS:
+            if ENABLE_MOCK :
                 logger.warning("[MOCK] ⚠️ Sesión no encontrada en DynamoDB, usando datos MOCK")
                 session_data = get_mock_session_data(documento)
                 token = session_data.get('token', '')
@@ -705,6 +729,8 @@ def handler(event, context):
             "totalFallidos": fallidos
         }
         
+        del_chips = delete_mock_chips_seleccionados(documento)
+        
         return build_response(event, response, 200 if success else 200)  # 207 = Multi-Status
         
     except requests.exceptions.Timeout:
@@ -732,7 +758,6 @@ def handler(event, context):
             "success": False,
             "message": "Error interno al procesar la generación de certificados."
         }, 200)
-
 
 def get_session_data_from_dynamodb(documento):
     """
@@ -805,7 +830,6 @@ def get_session_data_from_dynamodb(documento):
         logger.exception("Stack trace completo:")
         return None
 
-
 def obtener_chips_seleccionados_desde_dynamo(documento):
     """
     Obtiene la lista de CHIPs seleccionados desde DynamoDB.
@@ -827,6 +851,54 @@ def obtener_chips_seleccionados_desde_dynamo(documento):
     
     try:
         table = dynamodb.Table(TABLE_TOKENS)
+        
+        response = table.get_item(Key={'documento': documento})
+        
+        if 'Item' not in response:
+            logger.warning(f" No se encontró registro en DynamoDB")
+            logger.warning(f"  - Documento: {documento[:3]}***")
+            logger.warning(f"  - Posibles causas:")
+            logger.warning(f"    1. Sesión expirada (TTL de 10 minutos)")
+            logger.warning(f"    2. Usuario no completó validación OTP")
+            logger.warning(f"    3. Usuario no buscó ningún predio")
+            return []
+        
+        item = response['Item']
+        chips_seleccionados = item.get('chipsSeleccionados', [])
+        
+        # Asegurar que sea una lista
+        if not isinstance(chips_seleccionados, list):
+            logger.warning(f" chipsSeleccionados no es una lista, es: {type(chips_seleccionados)}")
+            chips_seleccionados = []
+        
+        logger.info(f" CHIPs seleccionados recuperados exitosamente")
+        logger.info(f"  - Total de CHIPs: {len(chips_seleccionados)}")
+        logger.info(f"  - CHIPs: {chips_seleccionados}")
+        logger.info(f"  - Documento: {documento[:3]}***")
+        
+        return chips_seleccionados
+        
+    except ClientError as e:
+        error_code = e.response['Error']['Code']
+        error_message = e.response['Error']['Message']
+        logger.error(f" Error de DynamoDB: {error_code}")
+        logger.error(f"  - Mensaje: {error_message}")
+        logger.error(f"  - Documento: {documento[:3]}***")
+        return []
+    except Exception as e:
+        logger.error(f" Error inesperado obteniendo CHIPs seleccionados")
+        logger.error(f"  - Tipo: {type(e).__name__}")
+        logger.error(f"  - Mensaje: {str(e)}")
+        logger.exception("Stack trace completo:")
+        return []
+
+def obtener_chips_seleccionados_desde_dynamo_mock(documento):
+    try:
+        logger.info(" Recuperando CHIPs seleccionados de DynamoDB (MOCK)...")
+        logger.info(f"  - Tabla: {MOCK_USERS_TABLE}")
+        logger.info(f"  - Documento (PK): {documento[:3]}***")
+
+        table = dynamodb.Table(MOCK_USERS_TABLE)
         
         response = table.get_item(Key={'documento': documento})
         

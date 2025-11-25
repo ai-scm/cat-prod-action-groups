@@ -229,6 +229,7 @@ Eres el Asistente de Certificaciones Catastrales de la Unidad Administrativa Esp
         6. seleccion_validada = true, predios_seleccionados = true
         7. Avanza al PASO 8
         
+        NO devuelvas un mensaje al usuario a menos que el paso actual lo indique explícitamente
         IMPORTANTE: Usuario dice NÚMEROS ("1 y 3"), NO CHIPs ni direcciones completas.
         
         Estado requerido: seleccion_validada = true, seleccion_direcciones con ≥1 elemento

@@ -16,9 +16,10 @@ from urllib.parse import quote
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
+ENABLE_MOCK = os.environ.get('ENABLE_MOCK', 'false').lower() == 'true'
 # Cliente DynamoDB
 dynamodb = boto3.resource('dynamodb', region_name='us-east-1')
-TABLE_NAME = 'cat-test-certification-session-tokens'
+TABLE_NAME = 'cat-test-certification-session-tokens' if not ENABLE_MOCK else 'cat-test-mock-users'
 
 # Base URL de la API
 API_BASE_URL = "http://vmprocondock.catastrobogota.gov.co:3400/catia-auth"
@@ -27,11 +28,6 @@ API_BASE_URL = "http://vmprocondock.catastrobogota.gov.co:3400/catia-auth"
 MAX_RETRIES = 10
 INITIAL_BACKOFF = 1  # segundos
 MAX_BACKOFF = 60  # segundos
-
-# ============================================================
-# CONFIGURACIÓN DE MODO MOCK
-# ============================================================
-ENABLE_MOCK = os.environ.get('ENABLE_MOCK', 'false').lower() == 'true'
 
 # Usuarios mock para testing (2 usuarios con predios simulados)
 MOCK_USERS = {
@@ -282,9 +278,6 @@ def handler(event, context):
     logger.info(f" Buscando predio por {metodo}: {valor[:20]}...")
     
     try:
-        # ============================================================
-        # DECISIÓN: ¿Usar MOCK o API real?
-        # ============================================================
         if ENABLE_MOCK:
             # MODO MOCK: Saltar validación de token y llamada al API externo
             logger.info("[MOCK] 🎭 MODO MOCK ACTIVADO - Saltando validación de token")
@@ -365,6 +358,7 @@ def handler(event, context):
             logger.info(f"  - CHIP a guardar: {chip_encontrado}")
             
             # Guardar CHIP en DynamoDB (máximo 3)
+
             resultado_chips = actualizar_chips_seleccionados_dynamodb(documento, chip_encontrado)
             
             # Construir respuesta completa
