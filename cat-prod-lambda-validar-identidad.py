@@ -11,7 +11,7 @@ logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
 # Environment variables
-API_BASE_URL = os.environ.get('API_BASE_URL', 'http://vmprocondock.catastrobogota.gov.co:3400/auth-catia')
+API_BASE_URL = os.environ.get('API_BASE_URL', 'http://vmprocondock.catastrobogota.gov.co:3400/catia-auth')
 API_KEY = os.environ.get('API_KEY', '')
 
 MAX_RETRIES = 8
