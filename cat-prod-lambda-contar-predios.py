@@ -50,7 +50,7 @@ def get_or_generate_mock_predios_count(documento):
     logger.info(f"[MOCK] Generando conteo aleatorio de predios para: {documento[:3]}***")
     
     # Generar número aleatorio de predios (5-15)
-    predios_count = random.randint(5, 15)
+    predios_count = random.randint(10, 15)
     logger.info(f"[MOCK] Generado conteo aleatorio: {predios_count} predios")
     
     try:
@@ -109,18 +109,17 @@ def get_mock_response(documento):
     predios_count = get_or_generate_mock_predios_count(documento)
     
     logger.info(f"[MOCK]  Conteo de predios generado y guardado: {predios_count}")
-    
     return {
         'status_code': 200,
-        'data': {
+        "data": {
             "success": True,
             "message": f"Predios consultados exitosamente (MOCK)",
+            "documento": documento,
+            "nombreUsuario": f"Usuario Mock {documento[:3]}***",
             "data": {
                 "cantidadPredios": predios_count,
-                "documento": documento,
-                "nombreUsuario": f"Usuario Mock {documento[:3]}***",
-                "mockMode": True
             },
+            "mockMode": True,
             "errorCode": ""
         }
     }

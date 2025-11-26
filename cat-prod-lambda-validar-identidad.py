@@ -135,10 +135,10 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             response_data = api_response.get('data', {})
             logger.error(f"API respondió con error - Status: {api_response['status_code']}, Error: {response_data.get('message', 'Error desconocido')}")
             return format_bedrock_response(
-                status_code=api_response['status_code'],
+                status_code=200,
                 body={
                     "valido": False,
-                    "mensaje": f"Error en la validación: {api_response.get('message', 'Error desconocido')}"
+                    "mensaje": f"Error en la validación: {response_data.get('message', 'Error desconocido')}"
                 },
                 event=event
             )
