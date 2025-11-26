@@ -16,7 +16,10 @@
       "identidadValidada": "Estado de validación identidad: 'SI' o 'NO'",
       "otpValidado": "Estado de validación OTP: 'SI' o 'NO'",
       "cantidadPredios": "Número total de predios del usuario (si ya fue consultado)",
-      "flujo": "Tipo de flujo activo: 'LISTAR' o 'BUSCAR' (si ya fue determinado)"
+      "flujo": "Tipo de flujo activo: 'LISTAR' o 'BUSCAR' (si ya fue determinado)",
+      "metodo": "Método de búsqueda elegido: 'CHIP', 'DIRECCION', 'MATRICULA' (solo en flujo BUSCAR)",
+      "valor": "Valor proporcionado para búsqueda: CHIP, dirección o matrícula (solo en flujo BUSCAR)",
+      "zona": "Zona para matrícula: 'Norte', 'Centro', 'Sur' (solo cuando metodo='MATRICULA')"
     },
     
     "EJEMPLO_DE_INVOCACION_CON_SESSION_ATTRIBUTES": {
@@ -154,7 +157,9 @@
           "identidadValidada": "SI",
           "otpValidado": "SI",
           "cantidadPredios": "15",
-          "flujo": "BUSCAR"
+          "flujo": "BUSCAR",
+          "metodo": "CHIP",
+          "valor": "AAA916455727839"
         }
       },
       "SI_NO_ENCUENTRAS_DATOS": "Si realmente no tienes acceso a mensajes previos (nueva conversación), ENTONCES y SOLO ENTONCES puedes usar 'asumiendo' o 'desconocida'"
@@ -197,8 +202,10 @@
       "patron_chip": "Códigos alfanuméricos de 12-15 caracteres (ej: AAA916455727839, XXX123456789012)",
       "patron_otp": "Códigos de 4 dígitos (ej: 1234, 8642)",
       "patron_documento": "Números de 6-12 dígitos cuando es el primer dato del usuario",
-      "patron_matricula": "Formato alfanumérico con guión (ej: 25C-123456, 50C-789)",
-      "accion_obligatoria": "Cuando detectes estos patrones → Incluye en inputText: nombre, documento, tipo doc, habeas data, identidad, OTP, cantidad predios, flujo, método → Y TAMBIÉN en sessionAttributes"
+      "patron_seleccion_predios": "Números simples (1, 2, 3) o combinaciones ('1 y 3', '2,4') CUANDO estamos en flujo LISTAR y ya se mostraron predios → NO usar marcadores estructurados, usar formato normal",
+      "accion_obligatoria": "Cuando detectes estos patrones → Incluye en inputText: nombre, documento, tipo doc, habeas data, identidad, OTP, cantidad predios, flujo, método → Y TAMBIÉN en sessionAttributes",
+      "IMPORTANTE_FLUJO_LISTAR": "Si estamos en FLUJO LISTAR (≤10 predios) y el usuario proporciona números ('1', '2', '1 y 3') → USA formato normal sin marcadores estructurados ===DATOS_USUARIO===",
+      "IMPORTANTE_FLUJO_BUSCAR": "Si estamos en FLUJO BUSCAR (>10 predios) y el usuario proporciona CHIP/dirección/matrícula → USA marcadores estructurados ===DATOS_USUARIO=== al inicio del inputText"
     }
   },
   
@@ -224,6 +231,145 @@
           "otpValidado": "string - 'SI' o 'NO'",
           "cantidadPredios": "string - número como string",
           "flujo": "string - 'LISTAR' o 'BUSCAR'"
+        }
+      }
+    }
+  },
+  
+  "FORMATOS_DE_RESPUESTA_POR_FLUJO": {
+    "FLUJO_LISTAR_menos_de_10_predios": {
+      "descripcion": "Para usuarios con 1-10 predios - el agente muestra lista completa y usuario selecciona",
+      "formato_inputText": "Contexto: Usuario [nombre] documento [numero] tipo [tipo] completamente validado (habeas data aceptado, identidad validada, OTP validada). Tiene [X] predios asociados, flujo LISTAR. [contexto específico del paso]",
+      "cuando_retornar": {
+        "despues_de_contar_predios": "El agente retorna: lista numerada de predios con direcciones",
+        "despues_de_seleccionar_predios": "El agente retorna: confirmación de selección y opción para generar certificados",
+        "despues_de_generar_certificados": "El agente retorna: confirmación de envío por email"
+      },
+      "ejemplo_completo": {
+        "paso_1_contar": {
+          "inputText": "Contexto: Usuario maria lopez documento 456123789 tipo CE completamente validado (habeas data aceptado, identidad validada, OTP validada). Usuario solicita contar predios",
+          "sessionAttributes": {
+            "documento": "456123789",
+            "tipoDocumento": "CE",
+            "nombreUsuario": "maria lopez",
+            "habeasData": "SI",
+            "identidadValidada": "SI",
+            "otpValidado": "SI"
+          },
+          "agente_retorna": "Tiene 3 predios asociados: 1) CL 80 25 40, 2) KR 12 34 56, 3) DG 18 90 12"
+        },
+        "paso_2_seleccionar": {
+          "inputText": "Contexto: Usuario maria lopez documento 456123789 tipo CE completamente validado. Tiene 3 predios asociados, flujo LISTAR. Predios mostrados: 1) CL 80 25 40, 2) KR 12 34 56, 3) DG 18 90 12. Usuario selecciona: predio 1 y predio 3",
+          "sessionAttributes": {
+            "documento": "456123789",
+            "tipoDocumento": "CE",
+            "nombreUsuario": "maria lopez",
+            "habeasData": "SI",
+            "identidadValidada": "SI",
+            "otpValidado": "SI",
+            "cantidadPredios": "3",
+            "flujo": "LISTAR"
+          },
+          "agente_retorna": "Ha seleccionado los predios: 1) CL 80 25 40 y 3) DG 18 90 12. ¿Desea generar los certificados catastrales?"
+        },
+        "paso_3_generar": {
+          "inputText": "Contexto: Usuario maria lopez documento 456123789 tipo CE completamente validado. Tiene 3 predios asociados, flujo LISTAR. Predios seleccionados: 1) CL 80 25 40 y 3) DG 18 90 12. Usuario confirma: generar certificados",
+          "sessionAttributes": {
+            "documento": "456123789",
+            "tipoDocumento": "CE",
+            "nombreUsuario": "maria lopez",
+            "habeasData": "SI",
+            "identidadValidada": "SI",
+            "otpValidado": "SI",
+            "cantidadPredios": "3",
+            "flujo": "LISTAR"
+          },
+          "agente_retorna": "Los certificados catastrales han sido generados y enviados a su correo electrónico registrado 📧"
+        }
+      }
+    },
+    "FLUJO_BUSCAR_mas_de_10_predios": {
+      "descripcion": "Para usuarios con >10 predios - usuario busca predios específicos uno por uno",
+      "formato_inputText": "===DATOS_USUARIO=== DOCUMENTO: [NUMERO] TIPO_DOCUMENTO: [TIPO] NOMBRE: [NOMBRE] HABEAS_DATA: SI IDENTIDAD_VALIDADA: SI OTP_VALIDADO: SI CANTIDAD_PREDIOS: [X] FLUJO: BUSCAR METODO: [METODO] VALOR: [VALOR] ===FIN_DATOS_USUARIO=== Usuario proporciona [tipo_dato] para búsqueda: [valor]",
+      "cuando_retornar": {
+        "despues_de_contar_predios": "El agente retorna: cantidad de predios y opciones de búsqueda",
+        "despues_de_elegir_metodo": "El agente retorna: confirmación del método elegido",
+        "despues_de_proporcionar_dato_busqueda": "El agente retorna: resultado de búsqueda (encontrado/no encontrado) y estado de predios agregados",
+        "despues_de_agregar_predio": "El agente retorna: confirmación de agregado y opciones para continuar",
+        "despues_de_generar_certificados": "El agente retorna: confirmación de envío por email"
+      },
+      "ejemplo_completo": {
+        "paso_1_contar": {
+          "inputText": "Contexto: Usuario test blend documento 987654321 tipo CC completamente validado (habeas data aceptado, identidad validada, OTP validada). Usuario solicita contar predios",
+          "sessionAttributes": {
+            "documento": "987654321",
+            "tipoDocumento": "CC",
+            "nombreUsuario": "test blend",
+            "habeasData": "SI",
+            "identidadValidada": "SI",
+            "otpValidado": "SI"
+          },
+          "agente_retorna": "Tiene 15 predios asociados. Debe buscar predios específicos. Elija método: a) CHIP Catastral, b) Dirección, c) Matrícula"
+        },
+        "paso_2_elegir_metodo": {
+          "inputText": "Contexto: Usuario test blend documento 987654321 tipo CC completamente validado. Tiene 15 predios asociados, flujo BUSCAR. Usuario elige método: CHIP Catastral",
+          "sessionAttributes": {
+            "documento": "987654321",
+            "tipoDocumento": "CC",
+            "nombreUsuario": "test blend",
+            "habeasData": "SI",
+            "identidadValidada": "SI",
+            "otpValidado": "SI",
+            "cantidadPredios": "15",
+            "flujo": "BUSCAR"
+          },
+          "agente_retorna": "Ha elegido buscar por CHIP Catastral. Por favor proporcione el código CHIP del predio que desea buscar"
+        },
+        "paso_3_proporcionar_chip": {
+          "inputText": "===DATOS_USUARIO=== DOCUMENTO: 987654321 TIPO_DOCUMENTO: CC NOMBRE: test blend HABEAS_DATA: SI IDENTIDAD_VALIDADA: SI OTP_VALIDADO: SI CANTIDAD_PREDIOS: 15 FLUJO: BUSCAR METODO: CHIP VALOR: AAA916455727839 ===FIN_DATOS_USUARIO=== Usuario proporciona CHIP para búsqueda: AAA916455727839",
+          "sessionAttributes": {
+            "documento": "987654321",
+            "tipoDocumento": "CC",
+            "nombreUsuario": "test blend",
+            "habeasData": "SI",
+            "identidadValidada": "SI",
+            "otpValidado": "SI",
+            "cantidadPredios": "15",
+            "flujo": "BUSCAR",
+            "metodo": "CHIP",
+            "valor": "AAA916455727839"
+          },
+          "agente_retorna": "Predio encontrado: Dirección CL 45 # 12-34, Matrícula 25C-789. ¿Desea agregarlo a la lista? (1/3)"
+        },
+        "paso_4_agregar_predio": {
+          "inputText": "===DATOS_USUARIO=== DOCUMENTO: 987654321 TIPO_DOCUMENTO: CC NOMBRE: test blend HABEAS_DATA: SI IDENTIDAD_VALIDADA: SI OTP_VALIDADO: SI CANTIDAD_PREDIOS: 15 FLUJO: BUSCAR METODO: CHIP VALOR: AAA916455727839 ===FIN_DATOS_USUARIO=== Usuario confirma agregar predio encontrado",
+          "sessionAttributes": {
+            "documento": "987654321",
+            "tipoDocumento": "CC",
+            "nombreUsuario": "test blend",
+            "habeasData": "SI",
+            "identidadValidada": "SI",
+            "otpValidado": "SI",
+            "cantidadPredios": "15",
+            "flujo": "BUSCAR",
+            "metodo": "CHIP",
+            "valor": "AAA916455727839"
+          },
+          "agente_retorna": "Predio agregado exitosamente (1/3). Puede agregar hasta 2 predios más. ¿Desea buscar otro predio o generar los certificados?"
+        },
+        "paso_5_generar_certificados": {
+          "inputText": "Contexto: Usuario test blend documento 987654321 tipo CC validado completamente. Flujo BUSCAR, tiene 3 predios agregados: Predio 1 (CHIP: AAA916455727839), Predio 2 (CHIP: BBB987654321098), Predio 3 (CHIP: CCC555666777888). Usuario solicita: GENERAR CERTIFICADOS para los 3 predios agregados",
+          "sessionAttributes": {
+            "documento": "987654321",
+            "tipoDocumento": "CC",
+            "nombreUsuario": "test blend",
+            "habeasData": "SI",
+            "identidadValidada": "SI",
+            "otpValidado": "SI",
+            "cantidadPredios": "15",
+            "flujo": "BUSCAR"
+          },
+          "agente_retorna": "Los certificados catastrales para los 3 predios han sido generados y enviados a su correo electrónico registrado 📧"
         }
       }
     }
@@ -282,7 +428,7 @@
     
     "caso_5_deteccion_flujo_buscar": {
       "agente_responde": "Tiene 18 predios asociados. Debe buscar predios específicos",
-      "memoria_actualiza": "Cantidad predios: 18, Flujo: BUSCAR",
+      "memoria_actualiza": "Cantidad predios: 18, Flujo: BUSCAR, otpValidado=SI",
       "nota": "A partir de aquí, TODAS las llamadas deben mencionar que estamos en flujo BUSCAR con 18 predios Y pasar sessionAttributes",
       "sessionAttributes_actualizados": {
         "documento": "456123789",
@@ -310,7 +456,8 @@
           "identidadValidada": "SI",
           "otpValidado": "SI",
           "cantidadPredios": "18",
-          "flujo": "BUSCAR"
+          "flujo": "BUSCAR",
+          "metodo": "CHIP"
         }
       }
     },
@@ -321,7 +468,7 @@
       "memoria": "Habeas: true, Identidad: true, OTP: true, Usuario: maria lopez (456123789-CE), Predios: 18, Flujo: BUSCAR, Método: CHIP",
       "DETECTAS": "Mensaje es solo código alfanumérico → Es un CHIP → Usuario está en flujo BUSCAR esperando proporcionar CHIP",
       "tu_llamada": {
-        "input_text": "Contexto: Usuario maria lopez documento 456123789 tipo CE completamente validado (habeas data aceptado, identidad validada, OTP validado). Tiene 18 predios asociados, en flujo BUSCAR, método CHIP elegido. Usuario proporciona CHIP para búsqueda: XXX123456789012",
+        "input_text": "===DATOS_USUARIO=== DOCUMENTO: 456123789 TIPO_DOCUMENTO: CE NOMBRE: maria lopez HABEAS_DATA: SI IDENTIDAD_VALIDADA: SI OTP_VALIDADO: SI CANTIDAD_PREDIOS: 18 FLUJO: BUSCAR METODO: CHIP VALOR: XXX123456789012 ===FIN_DATOS_USUARIO=== Usuario proporciona CHIP para búsqueda: XXX123456789012",
         "sessionAttributes": {
           "documento": "456123789",
           "tipoDocumento": "CE",
@@ -330,11 +477,13 @@
           "identidadValidada": "SI",
           "otpValidado": "SI",
           "cantidadPredios": "18",
-          "flujo": "BUSCAR"
+          "flujo": "BUSCAR",
+          "metodo": "CHIP",
+          "valor": "XXX123456789012"
         }
       },
-      "ALTERNATIVA_EXPLICITA": {
-        "input_text": "Contexto: Usuario maria lopez documento 456123789 tipo CE VALIDADO (habeas SI, identidad SI, OTP SI). 18 predios totales. FLUJO BUSCAR. METODO CHIP. 0 predios agregados. Usuario proporciona CHIP: XXX123456789012",
+      "ALTERNATIVA_CRITICA_CON_MARCADORES_ESTRUCTURADOS": {
+        "input_text": "===DATOS_USUARIO=== DOCUMENTO: 456123789 TIPO_DOCUMENTO: CE NOMBRE: maria lopez HABEAS_DATA: SI IDENTIDAD_VALIDADA: SI OTP_VALIDADO: SI CANTIDAD_PREDIOS: 18 FLUJO: BUSCAR METODO: CHIP VALOR: XXX123456789012 ===FIN_DATOS_USUARIO=== Usuario proporciona CHIP para búsqueda: XXX123456789012",
         "sessionAttributes": {
           "documento": "456123789",
           "tipoDocumento": "CE",
@@ -343,7 +492,9 @@
           "identidadValidada": "SI",
           "otpValidado": "SI",
           "cantidadPredios": "18",
-          "flujo": "BUSCAR"
+          "flujo": "BUSCAR",
+          "metodo": "CHIP",
+          "valor": "XXX123456789012"
         }
       }
     },
@@ -484,7 +635,7 @@
           "usuario": "AAA916455727839",
           "DETECTAS": "código alfanumérico → CHIP",
           "llamada": {
-            "inputText": "Contexto: Usuario test blend documento 987654321 tipo CC VALIDADO (habeas SI, identidad SI, OTP SI). 15 predios totales. FLUJO BUSCAR. METODO CHIP. 0 predios agregados. Usuario proporciona CHIP para búsqueda: AAA916455727839",
+            "inputText": "===DATOS_USUARIO=== DOCUMENTO: 987654321 TIPO_DOCUMENTO: CC NOMBRE: test blend HABEAS_DATA: SI IDENTIDAD_VALIDADA: SI OTP_VALIDADO: SI CANTIDAD_PREDIOS: 15 FLUJO: BUSCAR METODO: CHIP VALOR: AAA916455727839 ===FIN_DATOS_USUARIO=== Usuario proporciona CHIP para búsqueda: AAA916455727839",
             "sessionAttributes": {
               "documento": "987654321",
               "tipoDocumento": "CC",
@@ -493,7 +644,9 @@
               "identidadValidada": "SI",
               "otpValidado": "SI",
               "cantidadPredios": "15",
-              "flujo": "BUSCAR"
+              "flujo": "BUSCAR",
+              "metodo": "CHIP",
+              "valor": "AAA916455727839"
             }
           }
         }
@@ -523,7 +676,9 @@
           "identidadValidada": "SI",
           "otpValidado": "SI",
           "cantidadPredios": "18",
-          "flujo": "BUSCAR"
+          "flujo": "BUSCAR",
+          "metodo": "CHIP",
+          "valor": "XXX123456789012"
         }
       },
       "NUNCA_HAGAS": "Enviar solo 'Usuario proporciona CHIP: XXX123456789012' sin contexto Y sin sessionAttributes → Esto hace que el agente pierda memoria y reinicie el proceso"
@@ -531,7 +686,7 @@
   },
   
   "traduccion_de_referencias": {
-    "numeros_de_predios": "Si usuario dice '1 y 3' → Traduce a direcciones/CHIPs completos",
+    "numeros_de_predios": "Si usuario dice '1 y 3' → Traduce a direcciones/CHIPs concretos",
     "metodos_de_busqueda": "Si usuario dice 'por chip' o 'a' → Traduce a 'método CHIP Catastral'",
     "confirmaciones": "Si usuario dice 'si', 'vale', 'ok' → Explica a QUÉ confirma"
   },
@@ -551,13 +706,16 @@
     "pregunta_6": "¿Usuario eligió método de búsqueda? → Incluir: 'METODO CHIP' o 'METODO DIRECCION' o 'METODO MATRICULA' en inputText",
     "pregunta_7": "¿Cuántos predios ha agregado? → Incluir: 'X predios agregados' o '0 predios agregados' en inputText",
     "pregunta_8_NUEVO": "¿Tengo documento y tipoDocumento? → OBLIGATORIO pasarlos en sessionAttributes",
-    "SI_TODAS_LAS_RESPUESTAS_SON_SI": "Incluye TODA esa información en el campo 'Contexto:' de tu inputText Y en sessionAttributes",
+    "pregunta_9_CRITICA_FLUJO_BUSCAR": "¿Es flujo BUSCAR (>10 predios) y usuario proporciona CHIP/dirección/matrícula PARA BÚSQUEDA? → OBLIGATORIO usar marcadores estructurados ===DATOS_USUARIO=== al inicio del inputText",
+    "pregunta_9B_CLARA_FLUJO_LISTAR": "¿Es flujo LISTAR (≤10 predios) y usuario selecciona predios ('1', '2', '1 y 3')? → USA formato normal SIN marcadores estructurados",
+    "pregunta_9C_GENERAR_CERTIFICADOS": "¿Usuario solicita generar certificados (ya tiene predios seleccionados/agregados)? → USA formato normal SIN marcadores estructurados, igual para LISTAR y BUSCAR",
+    "SI_TODAS_LAS_RESPUESTAS_SON_SI": "Incluye TODA esa información en el campo 'Contexto:' de tu inputText Y en sessionAttributes, Y usa marcadores estructurados si aplica",
     "SI_ALGUNA_ES_NO": "Aún así incluye las que SÍ conoces en el contexto Y en sessionAttributes"
   },
   
   "PLANTILLA_RECOMENDADA_FLUJO_BUSCAR_CHIP": {
     "cuando_usuario_proporciona_chip": {
-      "inputText": "Contexto: Usuario [NOMBRE] documento [NUMERO] tipo [TIPO] VALIDADO (habeas SI, identidad SI, OTP SI). [X] predios totales. FLUJO BUSCAR. METODO CHIP. [Y] predios agregados. Usuario proporciona CHIP para búsqueda: [CODIGO_CHIP]",
+      "inputText": "===DATOS_USUARIO=== DOCUMENTO: [NUMERO] TIPO_DOCUMENTO: [TIPO] NOMBRE: [NOMBRE] HABEAS_DATA: SI IDENTIDAD_VALIDADA: SI OTP_VALIDADO: SI CANTIDAD_PREDIOS: [X] FLUJO: BUSCAR METODO: CHIP VALOR: [CODIGO_CHIP] ===FIN_DATOS_USUARIO=== Usuario proporciona CHIP para búsqueda: [CODIGO_CHIP]",
       "sessionAttributes": {
         "documento": "[NUMERO]",
         "tipoDocumento": "[TIPO]",
@@ -566,11 +724,13 @@
         "identidadValidada": "SI",
         "otpValidado": "SI",
         "cantidadPredios": "[X]",
-        "flujo": "BUSCAR"
+        "flujo": "BUSCAR",
+        "metodo": "CHIP",
+        "valor": "[CODIGO_CHIP]"
       }
     },
     "ejemplo_concreto": {
-      "inputText": "Contexto: Usuario test blend documento 987654321 tipo CC VALIDADO (habeas SI, identidad SI, OTP SI). 15 predios totales. FLUJO BUSCAR. METODO CHIP. 0 predios agregados. Usuario proporciona CHIP para búsqueda: AAA916455727839",
+      "inputText": "===DATOS_USUARIO=== DOCUMENTO: 987654321 TIPO_DOCUMENTO: CC NOMBRE: test blend HABEAS_DATA: SI IDENTIDAD_VALIDADA: SI OTP_VALIDADO: SI CANTIDAD_PREDIOS: 15 FLUJO: BUSCAR METODO: CHIP VALOR: AAA916455727839 ===FIN_DATOS_USUARIO=== Usuario proporciona CHIP para búsqueda: AAA916455727839",
       "sessionAttributes": {
         "documento": "987654321",
         "tipoDocumento": "CC",
@@ -579,7 +739,9 @@
         "identidadValidada": "SI",
         "otpValidado": "SI",
         "cantidadPredios": "15",
-        "flujo": "BUSCAR"
+        "flujo": "BUSCAR",
+        "metodo": "CHIP",
+        "valor": "AAA916455727839"
       }
     }
   },
