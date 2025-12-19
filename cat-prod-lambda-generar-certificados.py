@@ -10,6 +10,8 @@ import requests
 import boto3
 import uuid
 import time
+import random
+import os
 from datetime import datetime
 from botocore.exceptions import ClientError
 
@@ -19,6 +21,7 @@ logger.setLevel(logging.INFO)
 # Clientes AWS
 dynamodb = boto3.resource('dynamodb', region_name='us-east-1')
 TABLE_TOKENS = 'cat-test-certification-session-tokens'
+MOCK_USERS_TABLE = 'cat-test-mock-users'
 TABLE_AUDITORIA = 'cat-test-certification-data'
 
 # Base URL de la API
@@ -31,6 +34,27 @@ MAX_BACKOFF = 60  # segundos
 
 # Límite de certificados por solicitud
 MAX_CERTIFICADOS = 3
+
+MOCK_USERS_TABLE = 'cat-test-mock-users'
+ENABLE_MOCK = os.environ.get('ENABLE_MOCK', 'false').lower() == 'true'
+MOCK_USERS = {
+    "123456789": {
+        "nombre": "Juan Carlos",
+        "apellido": "Rodríguez",
+        "email": "juan.rodriguez@catastro.test",
+        "prediosCount": 3
+    },
+    "987654321": {
+        "nombre": "María Elena",
+        "apellido": "González",
+        "email": "maria.gonzalez@catastro.test",
+        "prediosCount": 15
+    }
+}
+
+logger.info(f"[MOCK CONFIG] ENABLE_MOCK = {ENABLE_MOCK}")
+if ENABLE_MOCK:
+    logger.info(f"[MOCK CONFIG] Usuarios mock configurados: {list(MOCK_USERS.keys())}")
 
 
 def calculate_backoff(attempt):
@@ -48,6 +72,229 @@ def calculate_backoff(attempt):
     backoff = INITIAL_BACKOFF * (2 ** attempt)
     return min(backoff, MAX_BACKOFF)
 
+
+def get_mock_session_data(documento):
+    """
+    Genera datos de sesión simulados para testing sin acceder a DynamoDB.
+    
+    Args:
+        documento: Número de documento del usuario
+    
+    Returns:
+        dict: Datos de sesión simulados con token, usuario, y CHIPs
+    """
+    logger.info("[MOCK] 🎭 Generando datos de sesión mock")
+    logger.info(f"[MOCK] Documento: {documento[:3]}***")
+    
+    if documento in MOCK_USERS:
+        user_data = MOCK_USERS[documento]
+        
+        # CHIPs simulados según el usuario
+        if documento == "123456789":
+            # Usuario con 3 predios
+            chips_seleccionados = ["AAA0000001ABC", "AAA0000002DEF", "AAA0000003GHI"]
+        else:
+            # Usuario con 15 predios (solo seleccionó 3)
+            chips_seleccionados = ["BBB0000001XYZ", "BBB0000002XYZ", "BBB0000003XYZ"]
+        
+        logger.info(f"[MOCK] Usuario: {user_data['nombre']} {user_data['apellido']}")
+        logger.info(f"[MOCK] CHIPs seleccionados: {chips_seleccionados}")
+        
+        return {
+            'token': 'MOCK_JWT_TOKEN_12345',
+            'usuario': {
+                'nombre': user_data['nombre'],
+                'apellido': user_data['apellido'],
+                'email': user_data['email'],
+                'numeroDocumento': documento
+            },
+            'chipsSeleccionados': chips_seleccionados,
+            'documento': documento,
+            'mockMode': True
+        }
+    else:
+        logger.info(f"[MOCK] Usuario genérico")
+        return {
+            'token': 'MOCK_JWT_TOKEN_GENERIC',
+            'usuario': {
+                'nombre': 'Usuario',
+                'apellido': 'Mock Genérico',
+                'email': 'mock@catastro.test',
+                'numeroDocumento': documento
+            },
+            'chipsSeleccionados': ["XXX0000001DEF", "XXX0000002GHI"],
+            'documento': documento,
+            'mockMode': True
+        }
+
+
+def get_mock_chip_por_direccion(direccion):
+    """
+    Simula la conversión de dirección a CHIP sin llamar al API.
+    
+    Args:
+        direccion: Dirección del predio
+    
+    Returns:
+        dict: Resultado simulado con CHIP
+    """
+    logger.info(f"[MOCK] 🎭 Convirtiendo dirección a CHIP (simulado)")
+    logger.info(f"[MOCK] Dirección: {direccion[:30]}...")
+    
+    # Simular delay
+    time.sleep(random.uniform(0.2, 0.8))
+    
+    # Generar CHIP mock basado en hash de la dirección
+    import hashlib
+    hash_dir = hashlib.md5(direccion.encode()).hexdigest()[:8].upper()
+    chip_mock = f"MOCK{hash_dir}"
+    
+    logger.info(f"[MOCK] ✅ CHIP generado: {chip_mock}")
+    
+    return {
+        "success": True,
+        "chip": chip_mock,
+        "message": "CHIP encontrado exitosamente (MOCK)"
+    }
+
+def send_mock_email(email: str, request_number: str) -> None:
+    """
+    Simula el envío de un correo electrónico con la OTP
+    
+    Args:
+        email: Dirección de correo electrónico del usuario
+        otp: Clave temporal a enviar
+    """
+    logger.info(f"🎭 Simulando envío de correo a {email} con OTP: {request_number}")
+    
+    ses = boto3.client('ses', region_name='us-east-1')
+    subject = "CatIA TEST - Certificado Catastral"
+    body_text = f"""Estimado usuario,
+
+    Su certificado catastral ha sido generado exitosamente. 
+    Su número de radicado es: {request_number}
+    Saludos,
+    
+    """
+    try:
+        verified_email = ses.list_verified_email_addresses()
+        logger.info(f"🎭 Verified emails in SES: {verified_email}")
+        response = ses.send_email(
+            Source="julian.rincon@blend360.com",
+            Destination={
+                'ToAddresses': [email]
+            },
+            Message={
+                'Subject': {
+                    'Data': subject
+                },
+                'Body': {
+                    'Text': {
+                        'Data': body_text
+                    }
+                }
+            }
+        )
+        logger.info(f"🎭 Correo simulado enviado exitosamente: {response}")
+        return True
+    except Exception as e:
+        logger.error(f"🎭 Error simulando envío de correo: {str(e)}")
+        return False
+
+def delete_mock_chips_seleccionados(documento):
+    """
+    Elimina los chips seleccionados del usuario mock en DynamoDB.
+    
+    Args:
+        documento: Número de documento del usuario
+    """
+    logger.info(f"[MOCK] 🎭 Eliminando chips seleccionados para documento: {documento[:3]}***")
+    try:
+        dynamo_mock_table = dynamodb.Table(MOCK_USERS_TABLE)
+
+        response = dynamo_mock_table.update_item(
+            Key={'documento': documento},
+            UpdateExpression="REMOVE chipsSeleccionados",
+            ReturnValues="UPDATED_NEW"
+        )
+        logger.info(f"[MOCK] Chips seleccionados eliminados exitosamente")
+    except Exception as e:
+        logger.error(f"[MOCK] Error eliminando chips seleccionados: {str(e)}")
+
+def delete_chips_seleccionados(documento):
+    """
+    Elimina los chips seleccionados del usuario en DynamoDB (Tabla real).
+    
+    Args:
+        documento: Número de documento del usuario
+    """
+    logger.info(f" Limpiando chips seleccionados en DynamoDB para documento: {documento[:3]}***")
+    try:
+        table = dynamodb.Table(TABLE_TOKENS)
+
+        response = table.update_item(
+            Key={'documento': documento},
+            UpdateExpression="REMOVE chipsSeleccionados",
+            ReturnValues="UPDATED_NEW"
+        )
+        logger.info(f" Chips seleccionados eliminados exitosamente")
+    except Exception as e:
+        logger.error(f" Error eliminando chips seleccionados: {str(e)}")
+
+def get_mock_certificado_response(documento,chip):
+    """
+    Simula la generación de un certificado sin llamar al API externo.
+    
+    Args:
+        chip: CHIP del predio
+    
+    Returns:
+        dict: Respuesta simulada de generación de certificado
+    """
+    logger.info(f"[MOCK] 🎭 Generando certificado mock para CHIP: {chip}")
+    
+    # Simular delay realista (1-3 segundos por certificado)
+    delay = random.uniform(1.0, 3.0)
+    logger.info(f"[MOCK] Simulando generación de certificado ({delay:.2f}s)...")
+    time.sleep(delay)
+    
+    # Generar número de radicado mock
+    request_number = f"MOCK-{random.randint(1000000, 9999999)}"
+    
+    logger.info(f"[MOCK] ✅ Certificado generado exitosamente")
+    logger.info(f"[MOCK] Request Number: {request_number}")
+
+    try:
+        dynamo_mock_table = dynamodb.Table(MOCK_USERS_TABLE)
+
+        response = dynamo_mock_table.get_item(Key={'documento': documento})
+        mock_user = response.get('Item', None)
+        email = mock_user.get('correo', '') if mock_user else ''
+        if email:
+            logger.info(f"[MOCK] Enviando certificado al correo: {email}")
+            if send_mock_email(email, request_number):
+                logger.info(f"[MOCK] Correo simulado enviado exitosamente a {email}")
+                return {
+                        "success": True,
+                        "message": "Certificado generado y enviado al correo exitosamente (MOCK)",
+                        "requestNumber": request_number
+                    }
+            else:
+                logger.error(f"[MOCK] Error simulando envío de correo a {email}")
+                return {
+                        "success": False,
+                        "message": "Error enviando al correo (MOCK)",
+                        "requestNumber": request_number
+                    }
+        else:
+            logger.error(f"[MOCK] No se encontró correo electrónico para el usuario mock")
+            return {
+                        "success": False,
+                        "message": "Error enviando al correo (MOCK)",
+                        "requestNumber": request_number
+                    }
+    except Exception as e:
+        logger.error(f"[MOCK] Error enviando correo: {str(e)}")
 
 def handler(event, context):
     """
@@ -122,28 +369,80 @@ def handler(event, context):
             tipo_documento = body.get('tipoDocumento', '')
             
             # Direcciones (solo para flujo ListarPredios)
-            # Puede venir como string separado por comas, como lista, o como string JSON
+            # Puede venir en varios formatos desde el Agent:
+            # - lista real (list)
+            # - string JSON: '["a","b"]'
+            # - string doble-encoded: '"[\\"a\\",\\"b\\"]"'
+            # - comma-separated string: 'a, b'
             direcciones_raw = body.get('direcciones', '')
-            if isinstance(direcciones_raw, str):
-                # Intentar parsear como JSON si tiene formato de array
-                if direcciones_raw.strip().startswith('['):
-                    try:
-                        direcciones = json.loads(direcciones_raw)
-                        if not isinstance(direcciones, list):
-                            direcciones = []
-                    except (json.JSONDecodeError, ValueError):
-                        # Si falla el JSON parse, intentar split por comas
-                        direcciones = [dir.strip() for dir in direcciones_raw.split(',') if dir.strip()]
-                else:
-                    # Si viene como string "KR 7...,KR 7..."
-                    direcciones = [dir.strip() for dir in direcciones_raw.split(',') if dir.strip()]
-            elif isinstance(direcciones_raw, list):
+            logger.info(f" Raw 'direcciones' recibido (tipo: {type(direcciones_raw).__name__}): {str(direcciones_raw)[:200]}")
+
+            direcciones = []
+
+            if isinstance(direcciones_raw, list):
                 direcciones = direcciones_raw
+
+            elif isinstance(direcciones_raw, str):
+                logger.info("'direcciones' viene como string. Intentando normalizar a lista...")
+                temp = direcciones_raw.strip()
+
+                # Intentar parsear JSON hasta 3 niveles (maneja doble-encoding)
+                for attempt in range(3):
+                    if temp.startswith('[') and temp.endswith(']'):
+                        try:
+                            parsed = json.loads(temp)
+                            if isinstance(parsed, list):
+                                direcciones = parsed
+                                logger.info(f"Parse exitoso a lista en attempt {attempt+1}")
+                                break
+                            # Si parsed es string, puede ser doble-encoded - repetir
+                            if isinstance(parsed, str):
+                                temp = parsed
+                                logger.info("Parse devolvió string - posible doble encoding, intentando de nuevo")
+                                continue
+                            # Si no es lista ni string, romper
+                            break
+                        except (json.JSONDecodeError, ValueError) as e:
+                            logger.warning(f"json.loads falló en attempt {attempt+1}: {e}")
+                            break
+                    else:
+                        # No parece JSON array, salir del loop
+                        break
+
+                # Si aún no logramos una lista, intentar detectar formato con corchetes sin comillas
+                if not direcciones:
+                    # Caso común del bot intermedio: "[KR 7 6 16 SUR GJ 169]" (sin comillas internas)
+                    if temp.startswith('[') and temp.endswith(']'):
+                        inner = temp[1:-1].strip()
+                        # Remover comillas envolventes si existen
+                        if (inner.startswith('"') and inner.endswith('"')) or (inner.startswith("'") and inner.endswith("'")):
+                            inner = inner[1:-1].strip()
+
+                        if ',' in inner:
+                            direcciones = [p.strip().strip('"').strip("'") for p in inner.split(',') if p.strip()]
+                        elif inner:
+                            direcciones = [inner]
+                    else:
+                        # fallback: split por comas sobre el valor original
+                        direcciones = [d.strip() for d in direcciones_raw.split(',') if d.strip()]
+
             else:
                 direcciones = []
             
-            # Limpiar strings vacíos del array
-            direcciones = [d.strip() for d in direcciones if d and d.strip()]
+            # Limpiar strings vacíos del array y asegurar que todos sean strings
+            cleaned = []
+            for d in direcciones:
+                if isinstance(d, str) and d and d.strip():
+                    cleaned.append(d.strip())
+                else:
+                    # Attempt to coerce non-string values
+                    try:
+                        coerced = str(d).strip()
+                        if coerced:
+                            cleaned.append(coerced)
+                    except Exception:
+                        continue
+            direcciones = cleaned
             
             session_id = body.get('sessionId', event.get('sessionId', ''))
         else:
@@ -167,10 +466,12 @@ def handler(event, context):
     logger.info(f"  - sessionId (metadata): {session_id[:15] if session_id else '[VACÍO]'}***")
     
     # Determinar flujo
+    es_flujo_busqueda = False
     if direcciones and len(direcciones) > 0:
         logger.info(f" Flujo detectado: LISTAR PREDIOS (1-10 predios)")
     else:
         logger.info(f" Flujo detectado: BUSCAR PREDIOS (>10 predios, CHIPs en DynamoDB)")
+        es_flujo_busqueda = True
     
     # Validación de inputs
     if not documento:
@@ -200,41 +501,70 @@ def handler(event, context):
         logger.info(f"📍 Direcciones proporcionadas ({len(direcciones)}), convirtiendo a CHIPs...")
         logger.info(f"  - Direcciones: {direcciones}")
         
-        # Obtener token para hacer las conversiones
-        logger.info(" PASO 1A: Recuperando token JWT de DynamoDB para conversión...")
-        session_data = get_session_data_from_dynamodb(documento)
-        
-        if not session_data:
-            logger.error("❌ No se encontró token para conversión de direcciones")
-            return build_response(event, {
-                "success": False,
-                "message": "Token de autenticación no encontrado. Por favor reinicia el proceso."
-            }, 200)
-        
-        token = session_data.get('token', '')
-        
-        # Convertir cada dirección a CHIP
-        chips_convertidos = []
-        errores_conversion = []
-        
-        for idx, direccion in enumerate(direcciones, 1):
-            logger.info(f"\n--- Convirtiendo dirección {idx}/{len(direcciones)} ---")
-            logger.info(f"  - Dirección: {direccion}")
+        # ============================================================
+        # DECISIÓN: ¿Usar MOCK o API real para conversión?
+        # ============================================================
+        if ENABLE_MOCK:
+            # MODO MOCK: Usar conversión simulada
+            logger.info("[MOCK] 🎭 MODO MOCK - Convirtiendo direcciones con función mock")
             
-            resultado = obtener_chip_por_direccion(token, direccion)
+            chips_convertidos = []
+            errores_conversion = []
             
-            if resultado.get('success'):
-                chip = resultado.get('chip', '')
-                if chip:
-                    chips_convertidos.append(chip)
-                    logger.info(f"✅ CHIP obtenido: {chip}")
+            for idx, direccion in enumerate(direcciones, 1):
+                logger.info(f"\n[MOCK] --- Convirtiendo dirección {idx}/{len(direcciones)} ---")
+                logger.info(f"[MOCK]   - Dirección: {direccion}")
+                
+                resultado = get_mock_chip_por_direccion(direccion)
+                
+                if resultado.get('success'):
+                    chip = resultado.get('chip', '')
+                    if chip:
+                        chips_convertidos.append(chip)
+                        logger.info(f"[MOCK] ✅ CHIP obtenido: {chip}")
                 else:
-                    logger.error(f"❌ API no retornó CHIP para: {direccion}")
-                    errores_conversion.append(f"Dirección '{direccion}': No se obtuvo CHIP")
-            else:
-                logger.error(f"❌ Error convirtiendo dirección: {direccion}")
-                logger.error(f"  - Error: {resultado.get('message', 'Error desconocido')}")
-                errores_conversion.append(f"Dirección '{direccion}': {resultado.get('message', 'Error desconocido')}")
+                    logger.error(f"[MOCK] ❌ Error convirtiendo dirección: {direccion}")
+                    errores_conversion.append(f"Dirección '{direccion}': Error simulado")
+            
+        else:
+            # MODO REAL: Obtener token y usar API externa
+            logger.info("📡 MODO REAL - Obteniendo token para conversión")
+            
+            # Obtener token para hacer las conversiones
+            logger.info(" PASO 1A: Recuperando token JWT de DynamoDB para conversión...")
+            session_data = get_session_data_from_dynamodb(documento)
+            
+            if not session_data:
+                logger.error("❌ No se encontró token para conversión de direcciones")
+                return build_response(event, {
+                    "success": False,
+                    "message": "Token de autenticación no encontrado. Por favor reinicia el proceso."
+                }, 200)
+            
+            token = session_data.get('token', '')
+            
+            # Convertir cada dirección a CHIP usando API REAL
+            chips_convertidos = []
+            errores_conversion = []
+            
+            for idx, direccion in enumerate(direcciones, 1):
+                logger.info(f"\n--- Convirtiendo dirección {idx}/{len(direcciones)} ---")
+                logger.info(f"  - Dirección: {direccion}")
+                
+                resultado = obtener_chip_por_direccion(token, direccion)
+                
+                if resultado.get('success'):
+                    chip = resultado.get('chip', '')
+                    if chip:
+                        chips_convertidos.append(chip)
+                        logger.info(f"✅ CHIP obtenido: {chip}")
+                    else:
+                        logger.error(f"❌ API no retornó CHIP para: {direccion}")
+                        errores_conversion.append(f"Dirección '{direccion}': No se obtuvo CHIP")
+                else:
+                    logger.error(f"❌ Error convirtiendo dirección: {direccion}")
+                    logger.error(f"  - Error: {resultado.get('message', 'Error desconocido')}")
+                    errores_conversion.append(f"Dirección '{direccion}': {resultado.get('message', 'Error desconocido')}")
         
         logger.info(f"\n📊 Resultado de conversión:")
         logger.info(f"  - Total direcciones: {len(direcciones)}")
@@ -263,10 +593,23 @@ def handler(event, context):
         logger.info(" No se proporcionaron direcciones, leyendo CHIPs de DynamoDB...")
         logger.info("   (Usuario buscó predios y los guardó en DynamoDB con BuscarPredios)")
         
-        chips = obtener_chips_seleccionados_desde_dynamo(documento)
+        # ============================================================
+        # IMPORTANTE: SIEMPRE validar DynamoDB primero, incluso en MOCK
+        # Esto previene que se generen certificados sin predios asociados
+        # ============================================================
+        logger.info("📊 PASO 1: Validando si usuario tiene predios en DynamoDB...")
+
+        if ENABLE_MOCK:
+            chips = obtener_chips_seleccionados_desde_dynamo_mock(documento)
+        else:
+            chips = obtener_chips_seleccionados_desde_dynamo(documento)
         
         if not chips or len(chips) == 0:
             logger.error("❌ No se encontraron CHIPs seleccionados en DynamoDB")
+            logger.error(f"  - Documento: {documento[:3]}***")
+            logger.error(f"  - Esto significa que el usuario NO ha buscado/seleccionado predios")
+            logger.error(f"  - O que la sesión expiró (TTL de 10 minutos)")
+            
             return build_response(event, {
                 "success": False,
                 "message": "No has seleccionado ningún predio. Por favor busca y selecciona al menos un predio antes de generar certificados."
@@ -274,6 +617,7 @@ def handler(event, context):
         
         logger.info(f"✅ CHIPs recuperados de DynamoDB: {chips}")
         logger.info(f"  - Total de CHIPs: {len(chips)}")
+        logger.info(f"  - Usuario SÍ tiene predios seleccionados")
     
     # Validar límite de certificados
     if len(chips) > MAX_CERTIFICADOS:
@@ -285,8 +629,13 @@ def handler(event, context):
     logger.info(f"  - CHIPs a procesar: {chips}")
     
     try:
-        # 1. Obtener token JWT y datos de usuario de DynamoDB
-        logger.info(" PASO 1: Recuperando token JWT y datos de usuario de DynamoDB...")
+        # ============================================================
+        # PASO: Recuperar datos de sesión desde DynamoDB
+        # ============================================================
+        # NOTA: Incluso en modo MOCK, leemos de DynamoDB para obtener
+        # el usuario y validar que la sesión existe
+        # ============================================================
+        logger.info(" PASO: Recuperando datos de sesión de DynamoDB...")
         session_data = get_session_data_from_dynamodb(documento)
         
         if not session_data:
@@ -295,13 +644,22 @@ def handler(event, context):
             logger.error("    1. Token expiró (TTL de 10 minutos)")
             logger.error("    2. Documento incorrecto")
             logger.error("    3. Usuario no completó validación OTP")
-            return build_response(event, {
-                "success": False,
-                "message": "Token de autenticación no encontrado o expirado. Por favor reinicia el proceso."
-            }, 200)
-        
-        token = session_data.get('token', '')
-        usuario = session_data.get('usuario', {})
+            
+            # En modo MOCK, si no hay datos en DynamoDB, usar datos simulados
+            # pero SOLO si es un usuario conocido de MOCK_USERS
+            if ENABLE_MOCK :
+                logger.warning("[MOCK] ⚠️ Sesión no encontrada en DynamoDB, usando datos MOCK")
+                session_data = get_mock_session_data(documento)
+                token = session_data.get('token', '')
+                usuario = session_data.get('usuario', {})
+            else:
+                return build_response(event, {
+                    "success": False,
+                    "message": "Token de autenticación no encontrado o expirado. Por favor reinicia el proceso."
+                }, 200)
+        else:
+            token = session_data.get('token', '')
+            usuario = session_data.get('usuario', {})
         
         # Construir nombre completo desde usuario.nombre + usuario.apellido
         nombre = usuario.get('nombre', '')
@@ -328,7 +686,15 @@ def handler(event, context):
         for idx, chip in enumerate(chips, 1):
             logger.info(f"\n--- Procesando CHIP {idx}/{len(chips)}: {chip} ---")
             
-            resultado = generar_certificado(token, chip)
+            # ============================================================
+            # DECISIÓN: ¿Usar MOCK o API real para cada certificado?
+            # ============================================================
+            if ENABLE_MOCK:
+                logger.info(f"[MOCK] 🎭 Generando certificado mock para CHIP: {chip}")
+                resultado = get_mock_certificado_response(documento,chip)
+            else:
+                logger.info(f"📡 Generando certificado REAL para CHIP: {chip}")
+                resultado = generar_certificado(token, chip)
             
             if resultado.get('success'):
                 exitosos += 1
@@ -385,6 +751,16 @@ def handler(event, context):
             "totalFallidos": fallidos
         }
         
+        # Limpiar CHIPs seleccionados si estamos en el flujo de búsqueda (>10 predios)
+        # Esto evita que se reutilicen en una nueva sesión
+        if es_flujo_busqueda:
+            if ENABLE_MOCK:
+                logger.info("[MOCK] 🎭 Limpiando chips seleccionados en DynamoDB para usuario mock...")
+                delete_mock_chips_seleccionados(documento)
+            else:
+                logger.info(" Limpiando chips seleccionados en DynamoDB...")
+                delete_chips_seleccionados(documento)
+
         return build_response(event, response, 200 if success else 200)  # 207 = Multi-Status
         
     except requests.exceptions.Timeout:
@@ -412,7 +788,6 @@ def handler(event, context):
             "success": False,
             "message": "Error interno al procesar la generación de certificados."
         }, 200)
-
 
 def get_session_data_from_dynamodb(documento):
     """
@@ -485,7 +860,6 @@ def get_session_data_from_dynamodb(documento):
         logger.exception("Stack trace completo:")
         return None
 
-
 def obtener_chips_seleccionados_desde_dynamo(documento):
     """
     Obtiene la lista de CHIPs seleccionados desde DynamoDB.
@@ -546,6 +920,66 @@ def obtener_chips_seleccionados_desde_dynamo(documento):
         logger.error(f"  - Tipo: {type(e).__name__}")
         logger.error(f"  - Mensaje: {str(e)}")
         logger.exception("Stack trace completo:")
+        return []
+
+def obtener_chips_seleccionados_desde_dynamo_mock(documento):
+    try:
+        logger.info(" Recuperando CHIPs seleccionados de DynamoDB (MOCK)...")
+        logger.info(f"  - Tabla: {MOCK_USERS_TABLE}")
+        logger.info(f"  - Documento (PK): {documento[:3]}***")
+
+        table = dynamodb.Table(MOCK_USERS_TABLE)
+        
+        response = table.get_item(Key={'documento': documento})
+        
+        if 'Item' not in response:
+            logger.warning(f" No se encontró registro en DynamoDB")
+            logger.warning(f"  - Documento: {documento[:3]}***")
+            logger.warning(f"  - Posibles causas:")
+            logger.warning(f"    1. Sesión expirada (TTL de 10 minutos)")
+            logger.warning(f"    2. Usuario no completó validación OTP")
+            logger.warning(f"    3. Usuario no buscó ningún predio")
+            
+            # NO usar fallback a datos simulados - retornar lista vacía
+            # para mantener consistencia con CHIPs guardados por BuscarPredios
+            logger.info("[MOCK] No hay CHIPs guardados en DynamoDB, retornando lista vacía")
+            return []
+        
+        item = response['Item']
+        chips_seleccionados = item.get('chipsSeleccionados', [])
+        
+        # Asegurar que sea una lista
+        if not isinstance(chips_seleccionados, list):
+            logger.warning(f" chipsSeleccionados no es una lista, es: {type(chips_seleccionados)}")
+            chips_seleccionados = []
+        
+        logger.info(f" CHIPs seleccionados recuperados exitosamente")
+        logger.info(f"  - Total de CHIPs: {len(chips_seleccionados)}")
+        logger.info(f"  - CHIPs: {chips_seleccionados}")
+        logger.info(f"  - Documento: {documento[:3]}***")
+        
+        return chips_seleccionados
+        
+    except ClientError as e:
+        error_code = e.response['Error']['Code']
+        error_message = e.response['Error']['Message']
+        logger.error(f" Error de DynamoDB: {error_code}")
+        logger.error(f"  - Mensaje: {error_message}")
+        logger.error(f"  - Documento: {documento[:3]}***")
+        
+        # NO usar fallback a datos simulados - retornar lista vacía
+        # para mantener consistencia con CHIPs guardados por BuscarPredios
+        logger.info("[MOCK] Error de DynamoDB, retornando lista vacía")
+        return []
+    except Exception as e:
+        logger.error(f" Error inesperado obteniendo CHIPs seleccionados")
+        logger.error(f"  - Tipo: {type(e).__name__}")
+        logger.error(f"  - Mensaje: {str(e)}")
+        logger.exception("Stack trace completo:")
+        
+        # NO usar fallback a datos simulados - retornar lista vacía
+        # para mantener consistencia con CHIPs guardados por BuscarPredios
+        logger.info("[MOCK] Error inesperado, retornando lista vacía")
         return []
 
 
@@ -750,7 +1184,6 @@ def obtener_chip_por_direccion(token, direccion):
         "chip": "",
         "message": f"Error después de {MAX_RETRIES} intentos: {str(last_exception)}"
     }
-
 
 def generar_certificado(token, chip):
     """

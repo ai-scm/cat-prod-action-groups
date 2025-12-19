@@ -37,17 +37,18 @@
       {
         "trigger": "Input es número simple",
         "context_check": "Flujo == 'LISTAR'",
-        "interpretation": "Es una selección de predio. Acción: Enviar a Bedrock traducido ('Selecciona predio X')."
+        "interpretation": "Es una selección de predio. Acción: Enviar a Bedrock traducido ('Selecciona predio X'). IMPORTANTE: Si en el historial reciente (último mensaje del asistente) se mostraron direcciones asociadas a los números, DEBES incluir la dirección correspondiente en el input text (ej: 'Selecciona predio X - Dirección: YYY')."
       }
     ]
   },
   "orchestration_logic": {
     "context_extraction_policy": {
-      "source": "Historial de mensajes (role: assistant).",
+      "source": "Historial de mensajes (role: assistant) y inputs del usuario.",
       "valid_signals": ["Identidad validada", "OTP validado", "Habeas data aceptado", "Tiene X predios"],
-      "action": "Si se detecta señal válida -> Marcar dato como TRUE en sessionAttributes."
+      "data_extraction": "Debes extraer y persistir OBLIGATORIAMENTE: Nombre completo, Tipo de documento, Número de documento. OPCIONAL: Direcciones de predios listados.",
+      "action": "Si se detecta señal válida o dato -> Guardar en sessionAttributes e incluir en ESTADO_ACTUAL."
     },
-    "bedrock_input_template": "ESTADO_ACTUAL: [DATOS_VALIDADOS] | FLUJO: [TIPO_FLUJO] | ACCION_USUARIO: [INTERPRETACION_DETERMINISTA]",
+    "bedrock_input_template": "ESTADO_ACTUAL: [DATOS_VALIDADOS_INCLUYENDO_NOMBRE] | FLUJO: [TIPO_FLUJO] | ACCION_USUARIO: [INTERPRETACION_DETERMINISTA_CON_DIRECCION]",
     "structured_payload_format": "===DATOS_USUARIO=== [KEY]: [VALUE] ... ===FIN_DATOS_USUARIO=== [MENSAJE_HUMANO]"
   },
   "assistant_logic": {
@@ -89,10 +90,11 @@
       "user": "8899",
       "action": "INVOKE_AGENT",
       "payload": {
-        "inputText": "ESTADO_ACTUAL: Doc 123 (CC), Habeas SI, Identidad SI | FLUJO: Validación | ACCION_USUARIO: Proporciona OTP 8899",
+        "inputText": "ESTADO_ACTUAL: Doc 123 (CC), Nombre Juan Perez, Habeas SI, Identidad SI | FLUJO: Validación | ACCION_USUARIO: Proporciona OTP 8899",
         "sessionAttributes": {
           "documento": "123",
           "tipoDocumento": "CC",
+          "nombreUsuario": "Juan Perez",
           "habeasData": "SI",
           "identidadValidada": "SI",
           "otpValidado": "NO"
