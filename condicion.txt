@@ -1,0 +1,15 @@
+"El mensaje cumple cualquiera de las siguientes condiciones, evaluadas estrictamente en este orden:
+1. FLUJO ACTIVO:
+   Si en la sesión existe al menos uno de estos campos:
+   flujo, habeasData, identidadValidada, otpValidado, cantidadPredios
+2. DATO TÉCNICO AISLADO:
+   Si el mensaje del usuario es SOLO:
+   - un OTP de 4 dígitos
+   - un número de documento (solo números, 6 o más dígitos)
+   - un código CHIP (alfanumérico, 11 o más caracteres)
+   - Dirección catastral (contiene vía tipo + número + complemento, ej: "CL 10 20 30 AP 201")
+   - Matrícula inmobiliaria (formato: 3 números + letra + números, ej: 050C01934185)
+3. INICIO DE TRÁMITE O CONSULTA (Sin historial previo): 
+El usuario manifiesta explícitamente su intención de obtener el documento o información sobre él. 
+- Palabras clave obligatorias: "Certificado Catastral", "Certificación Catastral". 
+- Intenciones: "Quiero un certificado", "Generar certificado", "Descargar certificación", "¿Qué es un certificado catastral?", "¿Cómo saco el certificado?"."
