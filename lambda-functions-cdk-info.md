@@ -120,12 +120,10 @@ const contarPrediosFunction = new lambda.Function(this, 'ContarPrediosFunction',
 **IAM Role**: arn:aws:iam::081899001252:role/cat-prod-certificaciones--GenerarCertsFnServiceRole-fH46yHO7YAWS
 
 **Tags:**
-- Project: Catastro-Certificaciones
-- Runtime: python3.12
+- ProjectId: P2124
+- Client: CAT
 - ManagedBy: CDK
-- CostCenter: IT-Operations
-- Environment: Production
-- Service: certificaciones-catastrales
+- Environment: env
 - Purpose: bedrock-agent-action
 - Component: lambda-function
 
@@ -154,12 +152,9 @@ const generarCertificadosFunction = new lambda.Function(this, 'GenerarCertificad
   })
 });
 
-Tags.of(generarCertificadosFunction).add('Project', 'Catastro-Certificaciones');
-Tags.of(generarCertificadosFunction).add('Runtime', 'python3.12');
+Tags.of(generarCertificadosFunction).add('ProjectId', 'P2124');
 Tags.of(generarCertificadosFunction).add('ManagedBy', 'CDK');
-Tags.of(generarCertificadosFunction).add('CostCenter', 'IT-Operations');
-Tags.of(generarCertificadosFunction).add('Environment', 'Production');
-Tags.of(generarCertificadosFunction).add('Service', 'certificaciones-catastrales');
+Tags.of(generarCertificadosFunction).add('Env', 'env'); //according to config
 Tags.of(generarCertificadosFunction).add('Purpose', 'bedrock-agent-action');
 Tags.of(generarCertificadosFunction).add('Component', 'lambda-function');
 ```
@@ -227,12 +222,10 @@ const listarPrediosFunction = new lambda.Function(this, 'ListarPrediosFunction',
 **Layer**: requests-layer:1 (different version)
 
 **Tags:**
-- Project: Catastro-Certificaciones
-- Runtime: python3.12
+- ProjectId: P2124
+- Client: CAT
 - ManagedBy: CDK
-- CostCenter: IT-Operations
-- Environment: Production
-- Service: certificaciones-catastrales
+- Environment: env
 - Purpose: bedrock-agent-action
 - Component: lambda-function
 
@@ -261,14 +254,11 @@ const validarIdentidadFunction = new lambda.Function(this, 'ValidarIdentidadFunc
   })
 });
 
-Tags.of(validarIdentidadFunction).add('Project', 'Catastro-Certificaciones');
-Tags.of(validarIdentidadFunction).add('Runtime', 'python3.12');
-Tags.of(validarIdentidadFunction).add('ManagedBy', 'CDK');
-Tags.of(validarIdentidadFunction).add('CostCenter', 'IT-Operations');
-Tags.of(validarIdentidadFunction).add('Environment', 'Production');
-Tags.of(validarIdentidadFunction).add('Service', 'certificaciones-catastrales');
-Tags.of(validarIdentidadFunction).add('Purpose', 'bedrock-agent-action');
-Tags.of(validarIdentidadFunction).add('Component', 'lambda-function');
+Tags.of(generarCertificadosFunction).add('ProjectId', 'P2124');
+Tags.of(generarCertificadosFunction).add('ManagedBy', 'CDK');
+Tags.of(generarCertificadosFunction).add('Env', 'env'); //according to config
+Tags.of(generarCertificadosFunction).add('Purpose', 'bedrock-agent-action');
+Tags.of(generarCertificadosFunction).add('Component', 'lambda-function');
 ```
 
 ---
@@ -292,14 +282,13 @@ Tags.of(validarIdentidadFunction).add('Component', 'lambda-function');
 **Layer**: requests-layer:1 (different version)
 
 **Tags:**
-- Project: Catastro-Certificaciones
-- Runtime: python3.12
+- ProjectId: P2124
+- Client: CAT
 - ManagedBy: CDK
-- CostCenter: IT-Operations
-- Environment: Production
-- Service: certificaciones-catastrales
+- Environment: env
 - Purpose: bedrock-agent-action
 - Component: lambda-function
+
 
 **CDK Code:**
 ```typescript
@@ -326,14 +315,11 @@ const validarOtpFunction = new lambda.Function(this, 'ValidarOtpFunction', {
   })
 });
 
-Tags.of(validarOtpFunction).add('Project', 'Catastro-Certificaciones');
-Tags.of(validarOtpFunction).add('Runtime', 'python3.12');
-Tags.of(validarOtpFunction).add('ManagedBy', 'CDK');
-Tags.of(validarOtpFunction).add('CostCenter', 'IT-Operations');
-Tags.of(validarOtpFunction).add('Environment', 'Production');
-Tags.of(validarOtpFunction).add('Service', 'certificaciones-catastrales');
-Tags.of(validarOtpFunction).add('Purpose', 'bedrock-agent-action');
-Tags.of(validarOtpFunction).add('Component', 'lambda-function');
+Tags.of(generarCertificadosFunction).add('ProjectId', 'P2124');
+Tags.of(generarCertificadosFunction).add('ManagedBy', 'CDK');
+Tags.of(generarCertificadosFunction).add('Env', 'env'); //according to config
+Tags.of(generarCertificadosFunction).add('Purpose', 'bedrock-agent-action');
+Tags.of(generarCertificadosFunction).add('Component', 'lambda-function');
 ```
 
 ## Required CDK Imports
