@@ -1,4 +1,4 @@
-Preguntas Frecuentes
+# Preguntas Frecuentes
 
 ¿Qué es y para qué sirve una certificación catastral?
 
@@ -14,13 +14,13 @@ Artículo 29 Resolución 1149 del 2021 del IGAC. “Efecto jurídico de la inscr
 Puede ampliar su información viendo este video: https://www.youtube.com/watch?v=TEZriSlfQM8
 
 
-¿Cómo obtengo una certificación catastral?
+## ¿Cómo obtengo una certificación catastral?
 
 Respuesta:
 
 Si es propietario, puede descargarla directamente en la página de Catastro en Línea- CEL: https://www.catastrobogota.gov.co/canal/catastro-en-linea,  debe estar registrado previamente en CEL. Si no es el propietario debe hacerlo en forma presencial demostrando la calidad en que actúa (apoderado, heredero, autorizado), solicitando previamente una cita a través de: https://www.catastrobogota.gov.co/agenda/inicio-agenda
 
-Si es propietario, también se puede solicitar por medio de Catia 
+Si es propietario, también se puede solicitar por medio de Catia con un máximo de tres certificaciones diarias.
 
 Las certificaciones catastrales solo se expiden al propietario o persona que demuestre la calidad en que actúa según lo establecido en la resolución de requisitos vigente de la UAECD.  Si no tiene vinculación con el predio y actúa como tercero, puede adquirir una certificación catastral para terceros en la tienda virtual: https://www.catastrobogota.gov.co/canal/tienda-virtual o en la tienda catastral ubicada en la CR 30 No. 25-90 Supercade CAD, esta certificación contiene la información física del predio (áreas, nomenclatura), no incluye información pública reservada como son datos jurídicos o avalúos.
 

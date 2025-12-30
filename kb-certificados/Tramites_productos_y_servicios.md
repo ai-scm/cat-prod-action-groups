@@ -1,7 +1,7 @@
-Tramites productos y servicios
+# Tramites productos y servicios
 
 
-Certificado Catastral
+## Certificado Catastral
 
 Obtener la certificación que hace constar la inscripción del predio o mejora, sus características y condiciones, indicando la vigencia del avalúo.
 
