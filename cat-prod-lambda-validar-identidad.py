@@ -3,6 +3,7 @@ import os
 import requests
 import logging
 import time
+import boto3
 from typing import Dict, Any
 
 # Configure logging
@@ -13,10 +14,35 @@ logger.setLevel(logging.INFO)
 API_BASE_URL = os.environ.get('API_BASE_URL', 'http://vmprocondock.catastrobogota.gov.co:3400/catia-auth')
 API_KEY = os.environ.get('API_KEY', '')
 
-# Configuración de reintentos con exponential backoff
 MAX_RETRIES = 8
 INITIAL_BACKOFF = 1  # segundos
 MAX_BACKOFF = 60  # segundos
+
+MOCK_TABLE = "cat-test-mock-users"
+MOCK_USERS = {
+    "135791113": {
+        "success": True,
+        "message": "Clave temporal enviada exitosamente",
+        "data": {
+            "mensaje": "Clave temporal enviada exitosamente",
+            "emailOfuscado": "j***@blend360.com",
+            "tiempoExpiracion": 5
+        },
+    "timestamp": "2025-11-20T13:31:16.768Z"
+    },
+    "24681012": {
+        "success": True,
+        "message": "Clave temporal enviada exitosamente",
+        "data": {
+            "mensaje": "Clave temporal enviada exitosamente",
+            "emailOfuscado": "j***@blend360.com",
+            "tiempoExpiracion": 5
+        },
+    "timestamp": "2025-11-20T13:31:16.768Z"
+    },
+    }
+ENABLE_MOCK = os.environ.get('ENABLE_MOCK', 'true').lower() == 'true'
+
 
 def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     """
@@ -42,7 +68,6 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         properties = application_json.get('properties', [])
         
         # Parse input parameters
-        nombre = None
         documento = None
         tipo_documento = None
         
@@ -51,19 +76,18 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 documento = prop.get('value')
             elif prop.get('name') == 'tipoDocumento':
                 tipo_documento = prop.get('value')
-            elif prop.get('name') == 'nombre':
-                nombre = prop.get('value')
         
-        logger.info(f"Parámetros extraídos - Nombre: {nombre}, Tipo: {tipo_documento}, Documento: {documento}")
+        logger.info(f"Parámetros extraídos - Tipo: {tipo_documento}, Documento: {documento}")
         
         # Validate required parameters
-        if not documento or not tipo_documento or not nombre:
+        if not documento or not tipo_documento:
             logger.error("Validación fallida: Parámetros requeridos faltantes")
             return format_bedrock_response(
                 status_code=400,
                 body={
                     "success": False,
-                    "message": "Parámetros requeridos faltantes: nombre, documento y tipoDocumento"
+                    "message": "Parámetros requeridos faltantes: documento y tipoDocumento",
+                    "errorCode": "MISSING_REQUIRED_PARAMS"
                 },
                 event=event
             )
@@ -72,10 +96,16 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         
         # Call external API
         logger.info("Iniciando llamada al API externo")
-        api_response = call_identity_validation_api(tipo_documento, documento)
+        
+        # Check if mock mode is enabled
+        if ENABLE_MOCK:
+            logger.warning("🎭 MOCK MODE ENABLED - Using test data instead of real API")
+            api_response = get_mock_response(documento, tipo_documento)
+        else:
+            api_response = call_identity_validation_api(tipo_documento, documento)
         
         # Process API response
-        if api_response['status_code'] == 200 and api_response.get('data', {}).get('success', False):
+        if api_response['status_code'] == 200:
             logger.info("API respondió exitosamente con status 200")
             response_data = api_response['data']
             logger.info(f"Datos de respuesta del API: {json.dumps(response_data)}")
@@ -86,7 +116,6 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 "message": response_data.get('data', {}).get('message', ''),
                 "correo_ofuscado": response_data.get('data', {}).get('emailOfuscado', ''),
                 "correo": "",  # Not provided by API
-                "nombre": nombre
             }
             
             logger.info(f"Resultado de validación mapeado: {json.dumps(validation_result)}")
@@ -98,27 +127,28 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 event=event
             )
         else:
-            print("API response:", api_response)
             # Handle API errors
-            error_data = api_response.get('data', {})
-            logger.error(f"API respondió con error - Status: {api_response['status_code']}, Error: {error_data.get('message', 'Error desconocido')}, Error Code: {error_data.get('errorCode', 'N/A')}")
+            response_data = api_response.get('data', {})
+            logger.error(f"API respondió con error - Status: {api_response['status_code']}, Error: {response_data.get('message', 'Error desconocido')}")
             return format_bedrock_response(
-                status_code=api_response['status_code'],
+                status_code=200,
                 body={
-                    "success": error_data.get('success', False),
-                    "message": f"Error en la validación: {error_data.get('message', 'Error desconocido')}"
+                    "valido": False,
+                    "mensaje": f"Error en la validación: {response_data.get('message', 'Error desconocido')}"
                 },
                 event=event
             )
     
     except Exception as e:
-        # Handle unexpected errors
+        # Handle unexpected errors - Return 200 with error body so Bedrock can handle it
         logger.exception(f"Error inesperado en lambda_handler: {str(e)}")
+        logger.warning("⚠️ Retornando 200 con error en body para que Bedrock pueda procesarlo")
         return format_bedrock_response(
-            status_code=500,
+            status_code=200,  # Changed from 500 to 200
             body={
                 "success": False,
-                "message": f"Error interno del servidor: {str(e)}"
+                "message": "Ocurrió un error inesperado. Por favor, intenta nuevamente.",
+                "errorCode": "INTERNAL_SERVER_ERROR"
             },
             event=event
         )
@@ -185,15 +215,15 @@ def call_identity_validation_api(tipo_documento: str, numero_documento: str) -> 
             if not response.content or len(response.content) == 0:
                 logger.error("Respuesta vacía del API")
                 
-                # Si es el último intento, retornar error
+                # Si es el último intento, retornar error (matching OpenAPI 500 schema)
                 if attempt == MAX_RETRIES - 1:
                     return {
-                        'status_code': 200,
+                        'status_code': 500,
                         'data': {
                             'success': False,
-                            'message': 'El API retornó una respuesta vacía después de múltiples intentos'
+                            'message': 'El API retornó una respuesta vacía después de múltiples intentos',
+                            'errorCode': 'EMPTY_RESPONSE'
                         }
-                        
                     }
                 
                 # Aplicar backoff y reintentar
@@ -218,15 +248,15 @@ def call_identity_validation_api(tipo_documento: str, numero_documento: str) -> 
                 logger.error(f"Error al parsear JSON: {str(json_err)}")
                 logger.error(f"Contenido que causó el error: {response.text}")
                 
-                # Si es el último intento, retornar error
+                # Si es el último intento, retornar error (matching OpenAPI 500 schema)
                 if attempt == MAX_RETRIES - 1:
                     return {
-                        'status_code': 200,
+                        'status_code': 500,
                         'data': {
                             'success': False,
-                            'message': 'Error al parsear JSON de la respuesta del API'
-                        },
-                        'error': f'Respuesta del API no es un JSON válido después de múltiples intentos. Content-Type: {content_type}, Content: {response.text[:200]}'
+                            'message': f'Respuesta del API no es un JSON válido después de múltiples intentos',
+                            'errorCode': 'INVALID_JSON_RESPONSE'
+                        }
                     }
                 
                 # Aplicar backoff y reintentar
@@ -247,17 +277,15 @@ def call_identity_validation_api(tipo_documento: str, numero_documento: str) -> 
             last_exception = e
             logger.error(f"Timeout en intento {attempt + 1}/{MAX_RETRIES} (30 segundos)")
             
-            # Si es el último intento, retornar error
+            # Si es el último intento, retornar error (matching OpenAPI 504 schema)
             if attempt == MAX_RETRIES - 1:
-                logger.error(f" Timeout después de {MAX_RETRIES} intentos")
+                logger.error(f"❌ Timeout después de {MAX_RETRIES} intentos")
                 return {
-                    'status_code': 200,
+                    'status_code': 504,
                     'data': {
                         'success': False,
-                        'message': 'Tiempo de espera agotado al conectar con el API'
-                    },
-                    'error': f'No se pudo conectar con el API después de múltiples intentos debido a timeout: {str(e)}'
-                
+                        'message': 'Tiempo de espera agotado al conectar con el API después de múltiples intentos'
+                    }
                 }
             
             # Aplicar exponential backoff
@@ -269,65 +297,64 @@ def call_identity_validation_api(tipo_documento: str, numero_documento: str) -> 
             last_exception = e
             logger.error(f"Error de conexión en intento {attempt + 1}/{MAX_RETRIES}: {str(e)}")
             
-            # Si es el último intento, retornar error
+            # Si es el último intento, retornar error (matching OpenAPI 503 schema)
             if attempt == MAX_RETRIES - 1:
-                logger.error(f"Error de conexión después de {MAX_RETRIES} intentos")
+                logger.error(f"❌ Error de conexión después de {MAX_RETRIES} intentos")
                 return {
-                    'status_code': 200,
+                    'status_code': 503,
                     'data': {
                         'success': False,
-                        'message': 'No se pudo conectar con el API'
-                    },
-                    'error': f'No se pudo conectar con el API después de múltiples intentos: {str(e)}'
+                        'message': f'No se pudo conectar con el API después de múltiples intentos'
+                    }
                 }
             
             # Aplicar exponential backoff
             backoff_time = calculate_backoff(attempt)
-            logger.warning(f"Esperando {backoff_time}s antes de reintentar...")
+            logger.warning(f"⏳ Esperando {backoff_time}s antes de reintentar...")
             time.sleep(backoff_time)
             
         except requests.exceptions.RequestException as e:
-
             last_exception = e
             logger.error(f"Error en la solicitud HTTP en intento {attempt + 1}/{MAX_RETRIES}: {str(e)}")
             
-            # Si es el último intento, retornar error
+            # Si es el último intento, retornar error (matching OpenAPI 500 schema)
             if attempt == MAX_RETRIES - 1:
-
-                logger.error(f"Error en solicitud HTTP después de {MAX_RETRIES} intentos")
+                logger.error(f"❌ Error en solicitud HTTP después de {MAX_RETRIES} intentos")
                 return {
-
-                    'status_code': 200,
+                    'status_code': 500,
                     'data': {
                         'success': False,
-                        'message': 'Error en la solicitud HTTP al conectar con el API'
-                    },
-                        'error': f'Error en la solicitud HTTP después de múltiples intentos: {str(e)}'
+                        'message': f'Error en la solicitud HTTP después de múltiples intentos',
+                        'errorCode': 'HTTP_REQUEST_ERROR'
+                    }
                 }
             
             # Aplicar exponential backoff
             backoff_time = calculate_backoff(attempt)
-            logger.warning(f"Esperando {backoff_time}s antes de reintentar...")
+            logger.warning(f"⏳ Esperando {backoff_time}s antes de reintentar...")
             time.sleep(backoff_time)
             
         except Exception as e:
-            # Para errores inesperados, no reintentar
+            # Para errores inesperados, no reintentar (matching OpenAPI 500 schema)
             logger.exception(f"Error inesperado en call_identity_validation_api: {str(e)}")
             return {
-                'status_code': 200,
+                'status_code': 500,
                 'data': {
                     'success': False,
-                    'message': 'Error inesperado al conectar con el API'
-                },
-                'error': f'Error inesperado: {str(e)}'
+                    'message': f'Error inesperado: {str(e)}',
+                    'errorCode': 'UNEXPECTED_ERROR'
+                }
             }
     
-    # Si llegamos aquí, algo salió mal en todos los intentos
-    logger.error(f"Falló después de {MAX_RETRIES} intentos")
+    # Si llegamos aquí, algo salió mal en todos los intentos (matching OpenAPI 500 schema)
+    logger.error(f"❌ Falló después de {MAX_RETRIES} intentos")
     return {
-
-        'status_code': 200,
-        'message': f'Error después de {MAX_RETRIES} intentos: {str(last_exception)}'
+        'status_code': 500,
+        'data': {
+            'success': False,
+            'message': f'Error después de {MAX_RETRIES} intentos: {str(last_exception)}',
+            'errorCode': 'MAX_RETRIES_EXCEEDED'
+        }
     }
 
 
@@ -345,6 +372,141 @@ def calculate_backoff(attempt):
     """
     backoff = INITIAL_BACKOFF * (2 ** attempt)
     return min(backoff, MAX_BACKOFF)
+
+
+def get_mock_response(documento: str, tipo_documento: str) -> Dict[str, Any]:
+    """
+    Returns a mock API response based on test user data
+    
+    Args:
+        documento: Document number
+        tipo_documento: Document type
+    
+    Returns:
+        Dictionary with status_code and data matching real API response format
+    """
+    logger.info(f"🎭 Getting mock response for documento: {documento[:3]}***")
+    
+    # Simulate network delay (random between 0.5-2 seconds)
+    import random
+    delay = random.uniform(0.5, 2.0)
+    random_otp = random.randint(1000, 9999)
+    success = False
+
+    dynamodb = boto3.resource('dynamodb', region_name='us-east-1')
+    
+    logger.info(f"🎭 Simulating API delay: {delay:.2f}s")
+    time.sleep(delay)
+
+    # Update OTP in DynamoDB table    
+    db_table = dynamodb.Table(MOCK_TABLE)
+
+    try:
+        logger.info(f"🎭 Actualizando OTP en DynamoDB para documento {documento[:3]}***")
+        response = db_table.update_item(
+            Key={'documento': documento},
+            UpdateExpression="SET otp = :otp, otp_timestamp = :ts",
+            ExpressionAttributeValues={
+                ':otp': str(random_otp),
+                ':ts': int(time.time())
+            },
+            ConditionExpression=f"attribute_exists(documento)",
+            ReturnValues="ALL_NEW"
+        )
+
+        logger.info(f"🎭 OTP actualizado en DynamoDB para documento {documento[:3]}")
+        logger.info(f"🎭 OTP response:{response}")
+        success = True
+    except Exception as e:
+        logger.error(f"🎭 Error actualizando OTP en DynamoDB para documento {documento}.  Error: {e}")
+
+    if success:
+        email = response['Attributes'].get('correo', '')
+        otp = response['Attributes'].get('otp', '')
+
+        try:
+            logger.info(f"🎭 Enviando OTP por correo a {email}")
+            if not send_mock_email(email,otp):
+                return{
+                    'status_code': 404,
+                    'data': {
+                        'success': False,
+                        'message': f'Usuario con documento {documento} no encontrado en datos de prueba',
+                        'error': 'USER_NOT_FOUND'
+                    }
+                }
+
+            return {
+            "status_code": 200,
+            "data": {
+                "success": True,
+                "message": "Clave temporal enviada exitosamente",
+                "emailOfuscado": "ju***@blend360.com",
+                "tiempoExpiracion": 5,
+                "timestamp": float(response['Attributes'].get('otp_timestamp', ''))
+            },
+            }
+
+        except Exception as e:
+            logger.error(f"🎭 Error enviando OTP por correo a {email}. Error: {e}")
+            return {
+            'status_code': 404,
+            'data': {
+                'success': False,
+                'message': f'Usuario con documento {documento} no encontrado en datos de prueba',
+                'error': 'USER_NOT_FOUND'
+            }
+        }
+
+    else:
+        return {
+            'status_code': 404,
+            'data': {
+                'success': False,
+                'message': f'Usuario con documento {documento} no encontrado en datos de prueba',
+                'error': 'USER_NOT_FOUND'
+            }
+        }
+
+
+def send_mock_email(email: str, otp: str) -> None:
+    """
+    Simula el envío de un correo electrónico con la OTP
+    
+    Args:
+        email: Dirección de correo electrónico del usuario
+        otp: Clave temporal a enviar
+    """
+    logger.info(f"🎭 Simulando envío de correo a {email} con OTP: {otp}")
+    
+    ses = boto3.client('ses', region_name='us-east-1')
+    subject = "CatIA TEST - Tú código de verificación"
+    body_text = f"Tu código de verificación es: {otp}. Esta clave expirará en 5 minutos."
+    try:
+        verified_email = ses.list_verified_email_addresses()
+        logger.info(f"🎭 Verified emails in SES: {verified_email}")
+        response = ses.send_email(
+            Source="julian.rincon@blend360.com",
+            Destination={
+                'ToAddresses': [email]
+            },
+            Message={
+                'Subject': {
+                    'Data': subject
+                },
+                'Body': {
+                    'Text': {
+                        'Data': body_text
+                    }
+                }
+            }
+        )
+        logger.info(f"🎭 Correo simulado enviado exitosamente: {response}")
+        return True
+    except Exception as e:
+        logger.error(f"🎭 Error simulando envío de correo: {str(e)}")
+        return False
+
 
 def format_bedrock_response(status_code: int, body: Dict[str, Any], event: Dict[str, Any]) -> Dict[str, Any]:
     """
