@@ -19,8 +19,7 @@
                 "type": "object",
                 "required": [
                   "documento",
-                  "tipoDocumento",
-                  "nombreCompleto"
+                  "tipoDocumento"
                 ],
                 "properties": {
                   "documento": {
@@ -33,11 +32,6 @@
                     "description": "Tipo de documento del ciudadano (CC, CE, TI, etc.)",
                     "example": "CC",
                     "enum": ["CC", "CE", "TI", "PA", "RC"]
-                  },
-                  "nombreCompleto": {
-                    "type": "string",
-                    "description": "Nombre completo del ciudadano (usado para auditoría)",
-                    "example": "Juan Pérez García"
                   },
                   "direcciones": {
                     "type": "array",

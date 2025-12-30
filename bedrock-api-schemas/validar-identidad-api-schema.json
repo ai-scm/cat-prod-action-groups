@@ -25,10 +25,6 @@
                     "tipoDocumento": {
                       "type": "string",
                       "description": "Tipo de documento de identidad"
-                    },
-                    "nombre": {
-                      "type": "string",
-                      "description": "Nombre del usuario"
                     }
                   },
                   "required": ["documento","tipoDocumento"]
@@ -47,7 +43,6 @@
                       "valido": { "type": "boolean" },
                       "correo": { "type": "string" },
                       "correo_ofuscado": { "type": "string" },
-                      "nombre": { "type": "string" },
                       "message": { "type": "string" }
                     }
                   }
